@@ -69,3 +69,13 @@ py_binary(
         requirement("sympy"),
     ],
 )
+
+py_binary(
+    name = "build_playbook",
+    srcs = ["build_playbook.py"],
+    deps = [
+        ":game_config",
+        ":math_playbook",
+    ],
+)
+
