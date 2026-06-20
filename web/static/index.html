@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Equadium Game</title>
+    <style>
+        body {
+            font-family: 'Georgia', serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            background-color: #f7f7f7;
+            color: #333;
+        }
+
+        h1 {
+            font-family: 'Times New Roman', serif;
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+        }
+
+        #main-container {
+            display: flex;
+            gap: 40px;
+            align-items: flex-start;
+        }
+
+        /* Board Design */
+        #board {
+            display: grid;
+            gap: 1px;
+            border: 2px solid #333;
+            background-color: #333;
+        }
+
+        .cell {
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #fff;
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+
+        .cell.valid {
+            background-color: #d1e7dd;
+        }
+
+        /* Soft green */
+        .cell.invalid {
+            background-color: #f8d7da;
+        }
+
+        /* Soft red */
+        .cell img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        /* Rack Design */
+        #rack {
+            display: flex;
+            gap: 8px;
+            margin-top: 20px;
+            padding: 10px;
+            background: #eee;
+            border-radius: 4px;
+        }
+
+        .tile {
+            width: 45px;
+            height: 45px;
+            border: 1px solid #999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: grab;
+            background: #fff;
+            font-size: 1.1rem;
+        }
+
+        .tile img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        /* Buttons */
+        button {
+            font-family: 'Helvetica', sans-serif;
+            padding: 8px 16px;
+            cursor: pointer;
+            border: 1px solid #333;
+            background: #fff;
+        }
+
+        button:hover {
+            background: #333;
+            color: #fff;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Equadium</h1>
+    <div id="main-container">
+        <div>
+            <div id="board"></div>
+            <div id="rack"></div>
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button id="playBtn" style="display:none;" onclick="submitMove()">Play move</button>
+                <button id="resetBtn" style="display:none;" onclick="resetTurn()">Reset</button>
+                <button id="swapBtn" onclick="toggleSwapMode()">Swap Tiles</button>
+            </div>
+            <div id="equals-pile" style="margin-top: 20px;">
+                Equals Pile: <span id="equals-count">0</span>
+                <button onclick="drawEqualsTile()">Draw [=]</button>
+            </div>
+            <button style="margin-top: 20px;" onclick="createNewGame()">New Game</button>
+        </div>
+        <div id="scoreboard">
+            <h3>Scoreboard</h3>
+            <div id="score-list"></div>
+        </div>
+    </div>
+
+    <script>
+        const TILE_ASSETS = {
+            "x": "/assets/tiles/x.svg",
+            "y": "/assets/tiles/y.svg",
+            "=": "/assets/tiles/=.svg",
+            "+": "/assets/tiles/+.svg",
+            "-": "/assets/tiles/-.svg",
+            "*": "/assets/tiles/_mul_.svg",
+            "/": "/assets/tiles/_div_.svg",
+            "(": "/assets/tiles/_paren_.svg",
+            ")": "/assets/tiles/.svg",
+            "d/dx(": "/assets/tiles/d_div_dx_paren_.svg",
+            "int(": "/assets/tiles/int_paren_.svg",
+            "C": "/assets/tiles/C.svg",
+            "x**2": "/assets/tiles/x_mul__mul_2.svg",
+            "x**3": "/assets/tiles/x_mul__mul_3.svg",
+            "x**4": "/assets/tiles/x_mul__mul_4.svg",
+            "1/2": "/assets/tiles/1_div_2.svg",
+            "1/3": "/assets/tiles/1_div_3.svg",
+            "1/6": "/assets/tiles/1_div_6.svg",
+            "1/63": "/assets/tiles/1_div_63.svg",
+            "(x+a)": "/assets/tiles/_paren_x+a.svg",
+            "(x+b)": "/assets/tiles/_paren_x+b.svg",
+            "e^x": "/assets/tiles/e_pow_x.svg",
+            "cos(x)": "/assets/tiles/cos_paren_x.svg",
+            "b": "/assets/tiles/b.svg",
+            "2": "/assets/tiles/2.svg",
+            "3": "/assets/tiles/3.svg",
+            "4": "/assets/tiles/4.svg",
+        };
+
+        function getTileContent(symbol) {
+            if (TILE_ASSETS[symbol]) {
+                return `<img src="${TILE_ASSETS[symbol]}" alt="${symbol}">`;
+            }
+            return symbol;
+        }
+
+        let gameId = null;
+        let boardState = null;
+        let playerRack = [];
+        let placedTiles = [];
+        let isSwapMode = false;
+        let selectedForSwap = [];
+        let playerScores = {};
+
+        async function createNewGame() {
+            const response = await fetch('/games/create', { method: 'POST' });
+            const data = await response.json();
+            gameId = data.game_id;
+            playerScores = {};
+            updateGame();
+        }
+
+        async function updateGame() {
+            if (!gameId) return;
+            const response = await fetch(`/games/${gameId}`);
+            const data = await response.json();
+            boardState = data.board;
+            playerRack = data.players[0].rack;
+            document.getElementById('equals-count').innerText = data.equals_pile_count;
+
+            const scoreListEl = document.getElementById('score-list');
+            scoreListEl.innerHTML = '';
+            data.players.forEach(p => {
+                const prevScore = playerScores[p.name] || 0;
+                const lastTurnScore = p.score - prevScore;
+                playerScores[p.name] = p.score;
+                const pEl = document.createElement('div');
+                pEl.innerHTML = `<strong>${p.name}</strong>: ${p.score} <small>(+${lastTurnScore})</small>`;
+                scoreListEl.appendChild(pEl);
+            });
+            renderBoard();
+            renderRack();
+        }
+
+        function renderBoard() {
+            if (!boardState) return;
+            const boardEl = document.getElementById('board');
+            boardEl.style.gridTemplateColumns = `repeat(${boardState.width}, 50px)`;
+            boardEl.innerHTML = '';
+            for (let r = 0; r < boardState.height; r++) {
+                for (let c = 0; c < boardState.width; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.dataset.r = r;
+                    cell.dataset.c = c;
+                    const existingTile = boardState.grid[r][c];
+                    const placed = placedTiles.find(p => p.r == r && p.c == c);
+                    if (existingTile) cell.innerHTML = getTileContent(existingTile.symbol);
+                    if (placed) {
+                        cell.innerHTML = getTileContent(placed.tile.symbol);
+                        cell.classList.add(placed.valid ? 'valid' : 'invalid');
+                        cell.draggable = true;
+                        cell.ondragstart = e => e.dataTransfer.setData('source', r + ',' + c);
+                    }
+                    cell.ondragover = e => e.preventDefault();
+                    cell.ondrop = e => handleDrop(e, r, c);
+                    boardEl.appendChild(cell);
+                }
+            }
+        }
+
+        function renderRack() {
+            const rackEl = document.getElementById('rack');
+            rackEl.innerHTML = '';
+            playerRack.forEach((tile, index) => {
+                const tileEl = document.createElement('div');
+                tileEl.className = 'tile';
+                if (isSwapMode) {
+                    tileEl.style.cursor = 'pointer';
+                    if (selectedForSwap.includes(index)) tileEl.style.background = 'yellow';
+                    tileEl.onclick = () => toggleSelectForSwap(index);
+                } else {
+                    tileEl.style.cursor = 'grab';
+                    tileEl.draggable = true;
+                    tileEl.dataset.index = index;
+                    tileEl.ondragstart = e => e.dataTransfer.setData('source', 'rack:' + index);
+                }
+                tileEl.innerHTML = getTileContent(tile.symbol);
+                rackEl.appendChild(tileEl);
+            });
+        }
+
+        function handleDrop(e, r, c) {
+            e.preventDefault();
+            if (boardState.grid[r][c] !== null) return;
+            const source = e.dataTransfer.getData('source');
+            const [type, index] = source.split(':');
+
+            let tile;
+            if (type === 'rack') {
+                tile = playerRack.splice(index, 1)[0];
+            } else {
+                const placedIndex = placedTiles.findIndex(p => p.r == type.split(',')[0] && p.c == type.split(',')[1]);
+                tile = placedTiles.splice(placedIndex, 1)[0].tile;
+            }
+            placedTiles.push({ r, c, tile, valid: false });
+            document.getElementById('resetBtn').style.display = 'block';
+            renderBoard();
+            renderRack();
+            validateMove();
+        }
+
+        function getMoveDirection() {
+            if (placedTiles.length < 2) return "H";
+            const r1 = placedTiles[0].r;
+            const r2 = placedTiles[1].r;
+            return r1 === r2 ? "H" : "V";
+        }
+
+        async function validateMove() {
+            const response = await fetch(`/games/${gameId}/validate_move`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tiles_to_play: placedTiles.map(p => ({ r: p.r, c: p.c, tile: p.tile })),
+                    direction: getMoveDirection()
+                })
+            });
+            const data = await response.json();
+            placedTiles.forEach(p => p.valid = data.valid);
+            document.getElementById('playBtn').style.display = data.valid ? 'block' : 'none';
+            renderBoard();
+        }
+
+        function resetTurn() {
+            placedTiles.forEach(p => playerRack.push(p.tile));
+            placedTiles = [];
+            document.getElementById('resetBtn').style.display = 'none';
+            document.getElementById('playBtn').style.display = 'none';
+            renderBoard();
+            renderRack();
+        }
+
+        async function submitMove() {
+            await fetch(`/games/${gameId}/play`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tiles_to_play: placedTiles.map(p => ({ r: p.r, c: p.c, tile: p.tile })),
+                    direction: getMoveDirection()
+                })
+            });
+            placedTiles = [];
+            document.getElementById('resetBtn').style.display = 'none';
+            document.getElementById('playBtn').style.display = 'none';
+            updateGame();
+        }
+
+        function toggleSwapMode() {
+            isSwapMode = !isSwapMode;
+            const swapBtn = document.getElementById('swapBtn');
+            if (isSwapMode) {
+                swapBtn.style.background = 'red';
+                swapBtn.innerText = 'Confirm Swap';
+            } else {
+                if (selectedForSwap.length > 0) performSwap();
+                swapBtn.style.background = '';
+                swapBtn.innerText = 'Swap Tiles';
+            }
+            renderRack();
+        }
+
+        function toggleSelectForSwap(index) {
+            if (selectedForSwap.includes(index)) selectedForSwap = selectedForSwap.filter(i => i !== index);
+            else selectedForSwap.push(index);
+            renderRack();
+        }
+
+        async function performSwap() {
+            await fetch(`/games/${gameId}/swap`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tile_indices: selectedForSwap })
+            });
+            selectedForSwap = [];
+            updateGame();
+        }
+
+        async function drawEqualsTile() {
+            await fetch(`/games/${gameId}/draw_equals`, { method: 'POST' });
+            updateGame();
+        }
+    </script>
+</body>
+
+</html>

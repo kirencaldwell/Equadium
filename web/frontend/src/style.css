@@ -1,0 +1,100 @@
+body {
+    font-family: 'Georgia', serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    background-color: #f7f7f7;
+    color: #333;
+}
+
+h1 {
+    font-family: 'Times New Roman', serif;
+    font-size: 2.5rem;
+    margin-bottom: 20px;
+}
+
+#main-container {
+    display: flex;
+    gap: 40px;
+    align-items: flex-start;
+}
+
+/* Board Design */
+#board {
+    display: grid;
+    gap: 1px;
+    border: 2px solid #333;
+    background-color: #333;
+}
+
+.cell {
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    font-size: 1.2rem;
+    font-weight: bold;
+}
+
+.cell.valid {
+    background-color: #d1e7dd;
+}
+
+/* Soft green */
+.cell.invalid {
+    background-color: #f8d7da;
+}
+
+/* Soft red */
+.cell img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+/* Rack Design */
+#rack {
+    display: flex;
+    gap: 8px;
+    margin-top: 20px;
+    padding: 10px;
+    background: #eee;
+    border-radius: 4px;
+}
+
+.tile {
+    width: 45px;
+    height: 45px;
+    border: 1px solid #999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+    background: #fff;
+    font-size: 1.1rem;
+}
+
+.tile img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+/* Buttons */
+button {
+    font-family: 'Helvetica', sans-serif;
+    padding: 8px 16px;
+    cursor: pointer;
+    border: 1px solid #333;
+    background: #fff;
+}
+
+button:hover {
+    background: #333;
+    color: #fff;
+}

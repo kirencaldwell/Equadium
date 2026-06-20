@@ -1,0 +1,23 @@
+module(
+    name = "equadium_game",
+    version = "1.0",
+)
+
+# Fetch the Python rules
+bazel_dep(name = "rules_python", version = "0.31.0")
+
+# Setup the Python toolchain (this downloads a hermetic Python environment)
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    python_version = "3.11",
+    is_default = True,
+)
+
+# Setup Pip and parse our requirements.txt
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+pip.parse(
+    hub_name = "pypi",
+    python_version = "3.11",
+    requirements_lock = "//:requirements.txt",
+)
+use_repo(pip, "pypi")

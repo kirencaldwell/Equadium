@@ -1,0 +1,41 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+venv/
+ENV/
+env/
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor / OS files
+.DS_Store
+*.swp
+*.swo
+
+# Node / Frontend
+web/frontend/node_modules/
+web/frontend/dist/
+web/frontend/.svelte-kit/
+web/frontend/.vercel/
+
+# Application Logs
+web/api/logs/
+*.log
+
+# Bazel
+bazel-*
+
+# Generated Game / Model Data
+playbook_cache.json
+mc_results_*.json
+mc_run.log
+mc_parallel_coords.html
+

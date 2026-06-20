@@ -1,0 +1,41 @@
+/* Equadium Game Color Palette Config File */
+/* Change the hex values below to customize the game board, tiles, and theme colors. */
+
+:root {
+    /* Page & General UI */
+    --color-page-bg:         #FAFAFA; /* Pristine off-white page background */
+    --color-text-primary:    #1A1A1A; /* Main text color */
+    --color-text-muted:      #888888; /* Secondary/muted text color (subtitles, counts) */
+    --color-border:          #4D243D; /* UI border lines (header and buttons) */
+
+    /* Game Board Grid */
+    --color-grid-bg:         #4D243D; /* Game board outer frame & signature aubergine */
+    --color-grid-line:       #DEE2E6; /* Crisp neutral line */
+    --color-cell-empty:      #EFF1F3; /* Deeper, soft matte grey background tint */
+
+    /* Game Tiles */
+    --color-tile-bg:         #C4EDFD; /* Standard tile card background */
+    --color-tile-text:       #1C7293; /* Main tile symbol and accent text color (Deep Teal) */
+    --color-tile-border:     #1C7293; /* Crisp border color to anchor played tiles */
+    
+    /* Play/Validation States */
+    --color-tile-correct:    #9ECE9A; /* Validated played tile background */
+    --color-tile-invalid:    #F2B8BB; /* Invalid played tile background */
+
+    /* Tile Rack */
+    --color-rack-bg:         #EDE8E6; /* Player rack container background */
+    --color-rack-border:     #D5CCC9; /* Player rack border color */
+
+    /* Selection & Actions */
+    --color-tile-swap-bg:     #FBEAC4; /* Tile background when selected for swapping */
+    --color-tile-swap-border: #C9A227; /* Border color for swapping tile selection */
+
+    /* Scoreboard */
+    --color-score-addition:  #58A35D; /* Classy, vibrant green for score additions */
+
+    /* Expression Multipliers */
+    --color-mult-x2-bg:      #F9E8C9; /* Soft pastel yellow for x2 background */
+    --color-mult-x2-border:  #D4B475; /* Soft pastel yellow for x2 border */
+    --color-mult-x3-bg:      #D6EAD4; /* Soft pastel green for x3 background */
+    --color-mult-x3-border:  #9BBF98; /* Soft pastel green for x3 border */
+}

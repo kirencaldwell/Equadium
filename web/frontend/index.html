@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Equadium Game</title>
+</head>
+<body>
+    <h1>Equadium</h1>
+    <div id="main-container">
+        <div>
+            <div id="board"></div>
+            <div id="rack"></div>
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button id="playBtn" style="display:none;">Play move</button>
+                <button id="resetBtn" style="display:none;">Reset</button>
+                <button id="swapBtn">Swap Tiles</button>
+            </div>
+            <div id="equals-pile" style="margin-top: 20px;">
+                Equals Pile: <span id="equals-count">0</span>
+                <button id="drawEqualsBtn">Draw [=]</button>
+            </div>
+            <button id="newGameBtn" style="margin-top: 20px;">New Game</button>
+        </div>
+        <div id="scoreboard">
+            <h3>Scoreboard</h3>
+            <div id="score-list"></div>
+        </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
