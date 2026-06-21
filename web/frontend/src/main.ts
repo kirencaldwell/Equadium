@@ -1,5 +1,16 @@
 import './style.css';
+import { createClient, RealtimeChannel, Session, User } from '@supabase/supabase-js';
 
+// ─────────────────────────────────────────────
+// Supabase client
+// ─────────────────────────────────────────────
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ─────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────
 interface Tile {
     symbol: string;
     points: number;
@@ -33,6 +44,9 @@ interface PlacedTile {
     valid: boolean;
 }
 
+// ─────────────────────────────────────────────
+// Tile asset map
+// ─────────────────────────────────────────────
 const TILE_ASSETS: Record<string, string> = {
     "x": "/assets/tiles/x.svg",
     "y": "/assets/tiles/y.svg",
@@ -70,15 +84,51 @@ function getTileContent(symbol: string): string {
     return symbol;
 }
 
+// ─────────────────────────────────────────────
+// Auth state
+// ─────────────────────────────────────────────
+let currentSession: Session | null = null;
+
+function getAuthHeaders(): HeadersInit {
+    const token = currentSession?.access_token;
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
+
+async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
+    return fetch(url, {
+        ...options,
+        headers: {
+            ...(options.headers || {}),
+            ...getAuthHeaders(),
+        }
+    });
+}
+
+// ─────────────────────────────────────────────
+// Game state
+// ─────────────────────────────────────────────
 let gameId: string | null = null;
 let boardState: Board | null = null;
-let playerRack: Tile[] = [];
+let playerRack: Tile[] = []
 let placedTiles: PlacedTile[] = [];
 let isSwapMode = false;
 let selectedForSwap: number[] = [];
 let playerScores: Record<string, number> = {};
+let realtimeChannel: RealtimeChannel | null = null;
 
+// Multiplayer
+let selectedPendingGameId: string | null = null;
+
+// ─────────────────────────────────────────────
 // DOM Elements
+// ─────────────────────────────────────────────
+const authOverlayEl = document.getElementById('auth-overlay') as HTMLDivElement;
+const googleLoginBtn = document.getElementById('google-login-btn') as HTMLButtonElement;
+const userProfileEl = document.getElementById('user-profile') as HTMLDivElement;
+const userAvatarEl = document.getElementById('user-avatar') as HTMLImageElement;
+const userNameEl = document.getElementById('user-name') as HTMLSpanElement;
+const logoutBtn = document.getElementById('logout-btn') as HTMLButtonElement;
+
 const playBtn = document.getElementById('playBtn') as HTMLButtonElement;
 const resetBtn = document.getElementById('resetBtn') as HTMLButtonElement;
 const swapBtn = document.getElementById('swapBtn') as HTMLButtonElement;
@@ -89,24 +139,212 @@ const scoreListEl = document.getElementById('score-list') as HTMLDivElement;
 const boardEl = document.getElementById('board') as HTMLDivElement;
 const rackEl = document.getElementById('rack') as HTMLDivElement;
 
-// Event Listeners
+const createMatchBtn = document.getElementById('create-match-btn') as HTMLButtonElement;
+const refreshGamesBtn = document.getElementById('refresh-games-btn') as HTMLButtonElement;
+const joinSelectedBtn = document.getElementById('join-selected-btn') as HTMLButtonElement;
+const pendingGamesListEl = document.getElementById('pending-games-list') as HTMLDivElement;
+const matchmakingStatusEl = document.getElementById('matchmaking-status') as HTMLDivElement;
+
+// ─────────────────────────────────────────────
+// Auth UI helpers
+// ─────────────────────────────────────────────
+function showAuthOverlay() {
+    authOverlayEl.classList.remove('hidden');
+}
+
+function hideAuthOverlay() {
+    authOverlayEl.classList.add('hidden');
+}
+
+function populateUserHeader(user: User) {
+    const avatarUrl = user.user_metadata?.avatar_url as string | undefined;
+    const displayName = (user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email ?? 'Player') as string;
+
+    if (avatarUrl) {
+        userAvatarEl.src = avatarUrl;
+        userAvatarEl.style.display = 'block';
+    } else {
+        userAvatarEl.style.display = 'none';
+    }
+    userNameEl.textContent = displayName;
+    userProfileEl.style.display = 'flex';
+}
+
+function clearUserHeader() {
+    userProfileEl.style.display = 'none';
+    userAvatarEl.src = '';
+    userNameEl.textContent = '';
+}
+
+// ─────────────────────────────────────────────
+// Auth events
+// ─────────────────────────────────────────────
+googleLoginBtn.addEventListener('click', async () => {
+    await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: window.location.origin }
+    });
+});
+
+logoutBtn.addEventListener('click', async () => {
+    await supabase.auth.signOut();
+});
+
+// Listen for auth state changes (login, logout, token refresh)
+supabase.auth.onAuthStateChange((_event, session) => {
+    currentSession = session;
+    if (session) {
+        hideAuthOverlay();
+        populateUserHeader(session.user);
+        loadPendingGames();
+    } else {
+        showAuthOverlay();
+        clearUserHeader();
+        teardownRealtime();
+    }
+});
+
+// Hydrate session on page load
+(async () => {
+    const { data } = await supabase.auth.getSession();
+    currentSession = data.session;
+    if (currentSession) {
+        hideAuthOverlay();
+        populateUserHeader(currentSession.user);
+        loadPendingGames();
+    }
+})();
+
+// ─────────────────────────────────────────────
+// Realtime
+// ─────────────────────────────────────────────
+function subscribeToGame(id: string) {
+    teardownRealtime();
+    realtimeChannel = supabase
+        .channel(`game:${id}`)
+        .on(
+            'postgres_changes',
+            { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${id}` },
+            (_payload) => {
+                // Opponent made a move — refresh local view
+                updateGame();
+            }
+        )
+        .subscribe();
+}
+
+function teardownRealtime() {
+    if (realtimeChannel) {
+        supabase.removeChannel(realtimeChannel);
+        realtimeChannel = null;
+    }
+}
+
+// ─────────────────────────────────────────────
+// Matchmaking
+// ─────────────────────────────────────────────
+function setMatchmakingStatus(msg: string) {
+    matchmakingStatusEl.textContent = msg;
+}
+
+async function loadPendingGames() {
+    const { data, error } = await supabase
+        .from('games')
+        .select('id, created_at, current_turn_player_id')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+    if (error) {
+        setMatchmakingStatus('Error loading games.');
+        return;
+    }
+
+    pendingGamesListEl.innerHTML = '';
+    selectedPendingGameId = null;
+    joinSelectedBtn.style.display = 'none';
+
+    if (!data || data.length === 0) {
+        pendingGamesListEl.innerHTML = '<div style="color:#888; font-size:0.8rem;">No open games.</div>';
+        return;
+    }
+
+    data.forEach((g: { id: string; created_at: string }) => {
+        const item = document.createElement('div');
+        item.className = 'pending-game-item';
+        item.textContent = `Game ${g.id.slice(0, 8)}… (${new Date(g.created_at).toLocaleTimeString()})`;
+        item.addEventListener('click', () => {
+            document.querySelectorAll('.pending-game-item').forEach(el => el.classList.remove('selected'));
+            item.classList.add('selected');
+            selectedPendingGameId = g.id;
+            joinSelectedBtn.style.display = 'block';
+        });
+        pendingGamesListEl.appendChild(item);
+    });
+}
+
+createMatchBtn.addEventListener('click', async () => {
+    if (!currentSession) return;
+    setMatchmakingStatus('Creating match…');
+
+    // Create game via FastAPI (backend creates in-memory and in DB)
+    const response = await apiFetch('/games/create', { method: 'POST' });
+    if (!response.ok) {
+        setMatchmakingStatus('Failed to create game.');
+        return;
+    }
+    const data = await response.json();
+    gameId = data.game_id;
+    playerScores = {};
+    setMatchmakingStatus(`Waiting for opponent… (Game ${String(gameId).slice(0, 8)})`);
+    subscribeToGame(gameId!);
+    updateGame();
+    loadPendingGames();
+});
+
+joinSelectedBtn.addEventListener('click', async () => {
+    if (!selectedPendingGameId || !currentSession) return;
+    setMatchmakingStatus('Joining game…');
+
+    const response = await apiFetch(`/games/${selectedPendingGameId}/join`, { method: 'POST' });
+    if (!response.ok) {
+        setMatchmakingStatus('Failed to join game.');
+        return;
+    }
+    gameId = selectedPendingGameId;
+    playerScores = {};
+    setMatchmakingStatus('Joined! Your turn may be next.');
+    subscribeToGame(gameId!);
+    updateGame();
+    loadPendingGames();
+});
+
+refreshGamesBtn.addEventListener('click', loadPendingGames);
+
+// ─────────────────────────────────────────────
+// Game control event listeners
+// ─────────────────────────────────────────────
 newGameBtn.addEventListener('click', createNewGame);
 playBtn.addEventListener('click', submitMove);
 resetBtn.addEventListener('click', resetTurn);
 swapBtn.addEventListener('click', toggleSwapMode);
 drawEqualsBtn.addEventListener('click', drawEqualsTile);
 
+// ─────────────────────────────────────────────
+// Core game functions
+// ─────────────────────────────────────────────
 async function createNewGame() {
-    const response = await fetch('/games/create', { method: 'POST' });
+    const response = await apiFetch('/games/create', { method: 'POST' });
     const data = await response.json();
     gameId = data.game_id;
     playerScores = {};
+    setMatchmakingStatus('');
     updateGame();
 }
 
 async function updateGame() {
     if (!gameId) return;
-    const response = await fetch(`/games/${gameId}`);
+    const response = await apiFetch(`/games/${gameId}`);
     const data: GameState = await response.json();
     boardState = data.board;
     playerRack = data.players[0].rack;
@@ -192,7 +430,7 @@ function handleDrop(e: DragEvent, r: number, c: number) {
     e.preventDefault();
     if (!boardState || boardState.grid[r][c] !== null) return;
     if (!e.dataTransfer) return;
-    
+
     const source = e.dataTransfer.getData('source');
     if (!source) return;
 
@@ -227,7 +465,7 @@ function getMoveDirection(): string {
 
 async function validateMove() {
     if (!gameId) return;
-    const response = await fetch(`/games/${gameId}/validate_move`, {
+    const response = await apiFetch(`/games/${gameId}/validate_move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -254,7 +492,7 @@ function resetTurn() {
 
 async function submitMove() {
     if (!gameId) return;
-    await fetch(`/games/${gameId}/play`, {
+    await apiFetch(`/games/${gameId}/play`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -294,7 +532,7 @@ function toggleSelectForSwap(index: number) {
 
 async function performSwap() {
     if (!gameId) return;
-    await fetch(`/games/${gameId}/swap`, {
+    await apiFetch(`/games/${gameId}/swap`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tile_indices: selectedForSwap })
@@ -305,6 +543,6 @@ async function performSwap() {
 
 async function drawEqualsTile() {
     if (!gameId) return;
-    await fetch(`/games/${gameId}/draw_equals`, { method: 'POST' });
+    await apiFetch(`/games/${gameId}/draw_equals`, { method: 'POST' });
     updateGame();
 }

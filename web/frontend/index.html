@@ -3,11 +3,115 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Equadium Game</title>
+    <title>Equadium — Math Tile Game</title>
+    <meta name="description" content="Equadium: the multiplayer math tile game. Place tiles to form valid equations and outscore your opponent.">
+    <style>
+        /* ── Auth overlay ── */
+        #auth-overlay {
+            position: fixed; inset: 0;
+            background: rgba(15,15,20,0.96);
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            z-index: 1000;
+            gap: 16px;
+            font-family: 'Georgia', serif;
+        }
+        #auth-overlay h2 { color: #e8d5b7; font-size: 2rem; margin: 0; }
+        #auth-overlay p  { color: #aaa; margin: 0; }
+        #auth-overlay.hidden { display: none; }
+
+        #google-login-btn {
+            display: flex; align-items: center; gap: 10px;
+            background: #fff; color: #333;
+            border: none; border-radius: 6px;
+            padding: 12px 24px; font-size: 1rem;
+            cursor: pointer; font-family: 'Helvetica', sans-serif;
+            font-weight: 600; margin-top: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            transition: box-shadow 0.2s;
+        }
+        #google-login-btn:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
+        #google-login-btn img { width: 20px; height: 20px; }
+
+        /* ── App header ── */
+        #app-header {
+            width: 100%; max-width: 1100px;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 20px; box-sizing: border-box;
+            border-bottom: 1px solid #ddd;
+            margin-bottom: 16px;
+        }
+        #app-header h1 { margin: 0; font-size: 1.8rem; font-family: 'Times New Roman', serif; }
+        #user-profile {
+            display: flex; align-items: center; gap: 10px;
+        }
+        #user-avatar {
+            width: 36px; height: 36px; border-radius: 50%;
+            border: 2px solid #888; object-fit: cover;
+        }
+        #user-name { font-size: 0.95rem; color: #444; }
+        #logout-btn {
+            font-size: 0.85rem; padding: 5px 12px;
+            cursor: pointer; border: 1px solid #999;
+            background: #fff; border-radius: 4px;
+        }
+        #logout-btn:hover { background: #333; color: #fff; border-color: #333; }
+
+        /* ── Matchmaking panel ── */
+        #matchmaking-panel {
+            width: 220px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            padding: 14px;
+            background: #fafafa;
+            font-family: 'Helvetica', sans-serif;
+            font-size: 0.9rem;
+        }
+        #matchmaking-panel h3 { margin: 0 0 12px 0; font-size: 1rem; }
+        #create-match-btn, #join-selected-btn, #refresh-games-btn {
+            width: 100%; padding: 8px; margin-top: 8px;
+            cursor: pointer; border: 1px solid #333; background: #fff;
+            font-family: 'Helvetica', sans-serif; border-radius: 3px;
+        }
+        #create-match-btn:hover, #join-selected-btn:hover, #refresh-games-btn:hover {
+            background: #333; color: #fff;
+        }
+        #pending-games-list { margin-top: 12px; }
+        .pending-game-item {
+            padding: 6px 8px; margin-top: 4px;
+            border: 1px solid #ddd; border-radius: 3px;
+            cursor: pointer; background: #fff;
+            transition: background 0.15s;
+        }
+        .pending-game-item:hover { background: #e8f0fe; }
+        .pending-game-item.selected { background: #d2e3fc; border-color: #4285f4; }
+        #matchmaking-status { margin-top: 8px; font-size: 0.8rem; color: #555; min-height: 16px; }
+    </style>
 </head>
 <body>
-    <h1>Equadium</h1>
-    <div id="main-container">
+    <!-- Auth Gate -->
+    <div id="auth-overlay">
+        <h2>Equadium</h2>
+        <p>Sign in to play multiplayer math tiles</p>
+        <button id="google-login-btn">
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google logo">
+            Sign in with Google
+        </button>
+    </div>
+
+    <!-- App Header -->
+    <div id="app-header">
+        <h1>Equadium</h1>
+        <div id="user-profile" style="display:none;">
+            <img id="user-avatar" src="" alt="Avatar">
+            <span id="user-name"></span>
+            <button id="logout-btn">Sign Out</button>
+        </div>
+    </div>
+
+    <!-- Main Layout -->
+    <div id="main-container" style="display:flex; gap:40px; align-items:flex-start; padding:0 20px;">
+        <!-- Game Board Column -->
         <div>
             <div id="board"></div>
             <div id="rack"></div>
@@ -20,13 +124,27 @@
                 Equals Pile: <span id="equals-count">0</span>
                 <button id="drawEqualsBtn">Draw [=]</button>
             </div>
-            <button id="newGameBtn" style="margin-top: 20px;">New Game</button>
+            <button id="newGameBtn" style="margin-top: 20px;">New Solo Game</button>
         </div>
+
+        <!-- Scoreboard -->
         <div id="scoreboard">
             <h3>Scoreboard</h3>
             <div id="score-list"></div>
         </div>
+
+        <!-- Matchmaking Panel -->
+        <div id="matchmaking-panel">
+            <h3>🎮 Multiplayer</h3>
+            <button id="create-match-btn">Create Match</button>
+            <button id="refresh-games-btn">↻ Refresh</button>
+            <div id="pending-games-list"></div>
+            <button id="join-selected-btn" style="display:none;">Join Selected Game</button>
+            <div id="matchmaking-status"></div>
+        </div>
     </div>
+
     <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
+

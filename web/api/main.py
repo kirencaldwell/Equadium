@@ -6,16 +6,52 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 import logging
 import json
 from datetime import datetime
+from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+import jwt  # PyJWT
+from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
-from typing import List
+from dotenv import load_dotenv
 from web.api.models import PlayerModel, BoardModel, MoveModel, TileModel
 from core.game_manager import EquadiumGame
 from core.game_config import CONFIG
 from core.ai_agent import AIAgent
 from core.math_playbook import MathPlaybook
 from core.game_entities import Move, Tile
+
+load_dotenv()
+
+# ── JWT validation ──────────────────────────────────────────────────────────
+# Set SUPABASE_JWT_SECRET in your .env (Project Settings → API → JWT Secret)
+SUPABASE_JWT_SECRET: Optional[str] = os.getenv("SUPABASE_JWT_SECRET")
+
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme)
+) -> Optional[str]:
+    """Decode a Supabase JWT and return the user's UUID (sub claim).
+    Returns None when no token is present (allows unauthenticated solo games).
+    Raises 401 when a token is present but invalid.
+    """
+    if credentials is None:
+        return None
+    if not SUPABASE_JWT_SECRET:
+        # JWT validation not configured – accept token as-is for local dev
+        return None
+    try:
+        payload = jwt.decode(
+            credentials.credentials,
+            SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+        return payload.get("sub")  # Supabase user UUID
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError as exc:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {exc}")
 
 # Ensure logs directory exists
 os.makedirs("web/api/logs", exist_ok=True)
@@ -107,19 +143,36 @@ def game_to_model(game):
     }
 
 @app.post("/games/create")
-def create_game():
+def create_game(current_user: Optional[str] = Depends(get_current_user)):
     game_id = str(len(games))
-    
+
     # Initialize game with Human + AI
     all_players = ["Human", "AI_Opponent"]
     game = EquadiumGame(all_players, CONFIG, verbose=True)
     games[game_id] = game
-    
+
+    # Track which Supabase user owns the "Human" seat
+    game._owner_user_id = current_user
+
     # Initialize AI Agent
     playbook = MathPlaybook(CONFIG, max_length=4)
     agents[game_id] = AIAgent("AI_Opponent", playbook, CONFIG, verbose=True)
-    
+
     return {"game_id": game_id}
+
+
+@app.post("/games/{game_id}/join")
+def join_game(game_id: str, current_user: Optional[str] = Depends(get_current_user)):
+    """Second player joins a pending multiplayer game."""
+    if game_id not in games:
+        raise HTTPException(status_code=404, detail="Game not found")
+    game = games[game_id]
+    owner = getattr(game, '_owner_user_id', None)
+    if current_user and owner == current_user:
+        raise HTTPException(status_code=400, detail="Cannot join your own game")
+    # Assign joining user to the AI seat for future turn validation
+    game._guest_user_id = current_user
+    return {"game_id": game_id, "status": "joined"}
 
 @app.get("/games/{game_id}")
 def get_game(game_id: str):
@@ -161,10 +214,11 @@ def validate_move(game_id: str, move: MoveModel):
 
 
 @app.post("/games/{game_id}/draw_equals")
-def draw_equals(game_id: str):
+def draw_equals(game_id: str, current_user: Optional[str] = Depends(get_current_user)):
     if game_id not in games:
         raise HTTPException(status_code=404, detail="Game not found")
     game = games[game_id]
+    _assert_player_turn(game, current_user)
     current_player = game.players[game.current_turn_index]
     success = game.draw_equals_tile(current_player)
     return {"success": success}
@@ -175,60 +229,80 @@ class SwapModel(BaseModel):
     tile_indices: List[int]
 
 @app.post("/games/{game_id}/swap")
-def swap_tiles(game_id: str, swap_data: SwapModel):
+def swap_tiles(game_id: str, swap_data: SwapModel, current_user: Optional[str] = Depends(get_current_user)):
     if game_id not in games:
         raise HTTPException(status_code=404, detail="Game not found")
     game = games[game_id]
+    _assert_player_turn(game, current_user)
     human_player = next(p for p in game.players if p.name == "Human")
-    
+
     # Map indices to actual tile objects in rack
     tiles_to_swap = [human_player.rack[i] for i in sorted(swap_data.tile_indices, reverse=True)]
-    
+
     # Create a swap move
     swap_move = Move(n_tiles_to_swap=len(tiles_to_swap))
-    
+
     # Execute swap
     success = game.execute_move(human_player, swap_move, tiles_to_swap=tiles_to_swap)
-    
-    # Trigger AI move if successful
-    if success and not game.is_game_over:
+
+    # Trigger AI move if successful (solo games only)
+    if success and not game.is_game_over and not _is_multiplayer(game):
         ai_player = next(p for p in game.players if p.name == "AI_Opponent")
         bot = agents[game_id]
         ai_move = bot.handle_turn(game)
         game.execute_move(ai_player, ai_move)
-    
+
     return {"status": "success" if success else "failed"}
 
+# ── Turn ownership helpers ──────────────────────────────────────────────────
+def _is_multiplayer(game) -> bool:
+    return getattr(game, '_guest_user_id', None) is not None
+
+
+def _assert_player_turn(game, current_user: Optional[str]):
+    """In a multiplayer game, ensure it's actually this user's turn."""
+    if not _is_multiplayer(game) or current_user is None:
+        return  # Solo game or unauthenticated – no restriction
+    active_player_idx = game.current_turn_index
+    owner = getattr(game, '_owner_user_id', None)
+    guest = getattr(game, '_guest_user_id', None)
+    # Player 0 == owner (Human seat), Player 1 == guest (previously AI seat)
+    expected_user = owner if active_player_idx == 0 else guest
+    if current_user != expected_user:
+        raise HTTPException(status_code=403, detail="Not your turn")
+
+
 @app.post("/games/{game_id}/play")
-def play_move(game_id: str, move: MoveModel):
+def play_move(game_id: str, move: MoveModel, current_user: Optional[str] = Depends(get_current_user)):
     if game_id not in games:
         raise HTTPException(status_code=404, detail="Game not found")
     game = games[game_id]
-    
+    _assert_player_turn(game, current_user)
+
     # 1. Convert MoveModel to Move object
     tiles_to_play = []
     for p in move.tiles_to_play:
         tile_data = p['tile']
         tile = Tile(symbol=tile_data['symbol'], points=tile_data['points'], expr_multiplier=tile_data['expr_multiplier'])
         tiles_to_play.append((p['r'], p['c'], tile))
-        
+
     # Use direction from frontend
     direction = move.direction or "H"
     engine_move = Move(tiles_to_play=tiles_to_play, direction=direction)
-    
-    # 2. Execute Human move
-    human_player = next(p for p in game.players if p.name == "Human")
-    success = game.execute_move(human_player, engine_move)
-    
-    if success and not game.is_game_over:
-        # 3. Trigger AI move
+
+    # 2. Determine active player
+    active_player = game.players[game.current_turn_index]
+    success = game.execute_move(active_player, engine_move)
+
+    if success and not game.is_game_over and not _is_multiplayer(game):
+        # 3. Trigger AI move in solo games
         ai_player = next(p for p in game.players if p.name == "AI_Opponent")
         bot = agents[game_id]
         ai_move = bot.handle_turn(game)
         game.execute_move(ai_player, ai_move)
-        
+
     log_game_state(game_id, game, "MOVE_PLAYED", {"move": move.dict(), "success": success})
-    
+
     return {"status": "success" if success else "failed"}
 
 static_dir = "web/frontend/dist" if os.path.exists("web/frontend/dist") else "web/static"
