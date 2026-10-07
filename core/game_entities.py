@@ -1,9 +1,11 @@
 
 class Move:
-    def __init__(self, tiles_to_play=None, direction=None, n_tiles_to_swap=0):
+    def __init__(self, tiles_to_play=None, direction=None, n_tiles_to_swap=0, tiles_to_swap=None):
         self.tiles_to_play = tiles_to_play if tiles_to_play is not None else []
         self.direction = direction
-        self.n_tiles_to_swap = n_tiles_to_swap
+        # A swap can name the exact tiles to throw back, or just a count (random tiles)
+        self.tiles_to_swap = tiles_to_swap if tiles_to_swap is not None else []
+        self.n_tiles_to_swap = len(self.tiles_to_swap) or n_tiles_to_swap
 
     @property
     def is_play(self):
@@ -83,13 +85,13 @@ class Board:
         # 1. Main Equation
         first_r, first_c, _ = placed_tiles[0]
         main_word, main_tiles = self._get_contiguous_string(first_r, first_c, main_dr, main_dc)
-        if len(main_word) > 1:
+        if len(main_tiles) > 1:
             equations_data.append((main_word, main_tiles))
 
         # 2. Orthogonal Cross Equations
         for r, c, tile in placed_tiles:
             cross_word, cross_tiles = self._get_contiguous_string(r, c, cross_dr, cross_dc)
-            if len(cross_word) > len(tile.symbol):
+            if len(cross_tiles) > 1:
                 equations_data.append((cross_word, cross_tiles))
 
         return equations_data

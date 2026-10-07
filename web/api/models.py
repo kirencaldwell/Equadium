@@ -23,3 +23,11 @@ class MoveModel(BaseModel):
     tiles_to_play: List[dict] # Will handle conversion manually or define a sub-model
     direction: Optional[str] = None
     n_tiles_to_swap: int = 0
+
+
+class CreateGameModel(BaseModel):
+    # human_vs_agent | human_vs_human | agent_vs_agent
+    mode: str = "human_vs_agent"
+
+class SwapModel(BaseModel):
+    tile_indices: List[int]

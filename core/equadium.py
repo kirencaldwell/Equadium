@@ -1,8 +1,7 @@
 from core.game_entities import make_tile
 from core.game_config import CONFIG
 from core.game_manager import EquadiumGame, run_autonomous_game
-from core.ai_agent import AIAgent
-from core.math_playbook import MathPlaybook
+from core.search_agent import SearchAgent
 
 
 def main(config=None, verbose=False):
@@ -14,14 +13,11 @@ def main(config=None, verbose=False):
         print("        AI VS AI: EQUADIUM GRANDMASTER MATCH      ")
         print("==================================================")
 
-    # 1. Boot up the "Brain" (The Playbook)
-    playbook = MathPlaybook(config, max_length=4)
-
     # 2. Initialize the Game Engine
     players = ["Newton_Bot", "Leibniz_Bot"]
 
-    # 3. Equip the Bots with the shared Playbook
-    agents = {name: AIAgent(name, playbook, config, verbose=False) for name in players}
+    # 3. Equip the bots (they search from their rack each turn; no precomputed playbook)
+    agents = {name: SearchAgent(name, config) for name in players}
 
     game, end_reason, scores = run_autonomous_game(players, agents, config, verbose=True)
 

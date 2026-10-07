@@ -12,8 +12,13 @@ from core.math_engine import MathEngine
 # Load environment variables
 load_dotenv()
 
+DEFAULT_CACHE_PATH = os.environ.get(
+    "EQUADIUM_PLAYBOOK_CACHE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "playbook_cache.json"),
+)
+
 class MathPlaybook:
-    def __init__(self, config, max_length=5, cache_path="/Users/kirencaldwell/Documents/Equadium/playbook_cache.json"):
+    def __init__(self, config, max_length=5, cache_path=DEFAULT_CACHE_PATH):
         # Maps a canonical SymPy result to a list of symbol sequences
         # e.g., { 2*x: [ ['d/dx(', 'x**2', ')'], ['2', '*', 'x'] ] }
         self.catalog = defaultdict(list)
@@ -169,8 +174,6 @@ class MathPlaybook:
         unique_symbols = [s for s in tile_config.keys() if s != "="]
         
         for length in range(1, max_length + 1):
-            sequences = itertools.product(unique_symbols, repeat=length)
-            print("len(sequences) = ", len(list(sequences)))
             for seq in itertools.product(unique_symbols, repeat=length):
                 if self._looks_like_garbage(seq):
                     continue

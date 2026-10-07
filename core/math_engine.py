@@ -123,7 +123,6 @@ class MathEngine:
             right_expr = self._parse_expression(eval_right)
             
             is_valid = sp.simplify(left_expr - right_expr) == 0
-            print(f"DEBUG: Comparing {left_expr} and {right_expr}, valid={is_valid}")
             return is_valid, "Valid"
             
         except Exception as e:
