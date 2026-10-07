@@ -13,12 +13,10 @@ from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
-from web.api.models import PlayerModel, BoardModel, MoveModel, TileModel
-from core.game_manager import EquadiumGame
+from web.api.models import PlayerModel, BoardModel, MoveModel, TileModel, CreateGameModel, SwapModel
 from core.game_config import CONFIG
-from core.ai_agent import AIAgent
-from core.math_playbook import MathPlaybook
-from core.game_entities import Move, Tile
+from core.game_entities import Tile
+from core.session import GameSession, MODES, HUMAN
 
 load_dotenv()
 
@@ -67,8 +65,7 @@ logger = logging.getLogger("equadium_beta")
 
 app = FastAPI()
 
-games = {} # Simple in-memory storage
-agents = {} # Store AI agents per game
+sessions = {}  # game_id -> GameSession (simple in-memory storage)
 
 # Middleware for structured request logging
 @app.middleware("http")
@@ -119,7 +116,8 @@ def tile_to_model(tile):
         expr_multiplier=tile.expr_multiplier
     )
 
-def game_to_model(game):
+def game_to_model(session):
+    game = session.game
     return {
         "board": BoardModel(
             width=game.board.width,
@@ -138,172 +136,182 @@ def game_to_model(game):
             )
             for p in game.players
         ],
-        "current_player": game.players[game.current_turn_index].name,
-        "equals_pile_count": len(game.equals_bag)
+        "current_player": session.current_player.name,
+        "equals_pile_count": len(game.equals_bag),
+        "mode": session.mode,
+        "seats": {name: seat.kind for name, seat in session.seats.items()},
+        "game_over": game.is_game_over,
+        "end_reason": game.end_reason,
+        "winners": game.winners if game.is_game_over else [],
+        "turns_played": game.turns_played,
+        "bag_count": len(game.tile_bag),
     }
 
-@app.post("/games/create")
-def create_game(current_user: Optional[str] = Depends(get_current_user)):
-    game_id = str(len(games))
-
-    # Initialize game with Human + AI
-    all_players = ["Human", "AI_Opponent"]
-    game = EquadiumGame(all_players, CONFIG, verbose=True)
-    games[game_id] = game
-
-    # Track which Supabase user owns the "Human" seat
-    game._owner_user_id = current_user
-
-    # Initialize AI Agent
-    playbook = MathPlaybook(CONFIG, max_length=4)
-    agents[game_id] = AIAgent("AI_Opponent", playbook, CONFIG, verbose=True)
-
-    return {"game_id": game_id}
-
-
-@app.post("/games/{game_id}/join")
-def join_game(game_id: str, current_user: Optional[str] = Depends(get_current_user)):
-    """Second player joins a pending multiplayer game."""
-    if game_id not in games:
+def _get_session(game_id: str) -> GameSession:
+    if game_id not in sessions:
         raise HTTPException(status_code=404, detail="Game not found")
-    game = games[game_id]
-    owner = getattr(game, '_owner_user_id', None)
-    if current_user and owner == current_user:
-        raise HTTPException(status_code=400, detail="Cannot join your own game")
-    # Assign joining user to the AI seat for future turn validation
-    game._guest_user_id = current_user
-    return {"game_id": game_id, "status": "joined"}
+    return sessions[game_id]
 
-@app.get("/games/{game_id}")
-def get_game(game_id: str):
-    if game_id not in games:
-        raise HTTPException(status_code=404, detail="Game not found")
-    return game_to_model(games[game_id])
-
-@app.post("/games/{game_id}/validate_move")
-def validate_move(game_id: str, move: MoveModel):
-    if game_id not in games:
-        raise HTTPException(status_code=404, detail="Game not found")
-    game = games[game_id]
-    
-    # 1. Convert MoveModel to Move object
-    tiles_to_play = []
-    for p in move.tiles_to_play:
-        tile_data = p['tile']
-        tile = Tile(symbol=tile_data['symbol'], points=tile_data['points'], expr_multiplier=tile_data['expr_multiplier'])
-        tiles_to_play.append((p['r'], p['c'], tile))
-        
-    # 2. Simulate placement to validate
-    game.board.place_tiles_temporarily(tiles_to_play)
-    
-    # Use direction from frontend
-    direction = move.direction or "H"
-    equations_data = game.board.get_all_new_equations(tiles_to_play, direction)
-    
-    # Math verification
-    all_valid = True
-    for eq_str, eq_tiles in equations_data:
-        if not game.math.validate_equation(eq_str)[0]:
-            all_valid = False
-            break
-            
-    # 3. Rollback
-    game.board.remove_tiles([(r, c) for r, c, _ in tiles_to_play])
-    
-    return {"valid": all_valid}
-
-
-@app.post("/games/{game_id}/draw_equals")
-def draw_equals(game_id: str, current_user: Optional[str] = Depends(get_current_user)):
-    if game_id not in games:
-        raise HTTPException(status_code=404, detail="Game not found")
-    game = games[game_id]
-    _assert_player_turn(game, current_user)
-    current_player = game.players[game.current_turn_index]
-    success = game.draw_equals_tile(current_player)
-    return {"success": success}
-
-from pydantic import BaseModel
-
-class SwapModel(BaseModel):
-    tile_indices: List[int]
-
-@app.post("/games/{game_id}/swap")
-def swap_tiles(game_id: str, swap_data: SwapModel, current_user: Optional[str] = Depends(get_current_user)):
-    if game_id not in games:
-        raise HTTPException(status_code=404, detail="Game not found")
-    game = games[game_id]
-    _assert_player_turn(game, current_user)
-    human_player = next(p for p in game.players if p.name == "Human")
-
-    # Map indices to actual tile objects in rack
-    tiles_to_swap = [human_player.rack[i] for i in sorted(swap_data.tile_indices, reverse=True)]
-
-    # Create a swap move
-    swap_move = Move(n_tiles_to_swap=len(tiles_to_swap))
-
-    # Execute swap
-    success = game.execute_move(human_player, swap_move, tiles_to_swap=tiles_to_swap)
-
-    # Trigger AI move if successful (solo games only)
-    if success and not game.is_game_over and not _is_multiplayer(game):
-        ai_player = next(p for p in game.players if p.name == "AI_Opponent")
-        bot = agents[game_id]
-        ai_move = bot.handle_turn(game)
-        game.execute_move(ai_player, ai_move)
-
-    return {"status": "success" if success else "failed"}
+def _tiles_from_model(move: MoveModel):
+    return [
+        (p['r'], p['c'], Tile(symbol=p['tile']['symbol'], points=p['tile']['points'],
+                              expr_multiplier=p['tile']['expr_multiplier']))
+        for p in move.tiles_to_play
+    ]
 
 # ── Turn ownership helpers ──────────────────────────────────────────────────
-def _is_multiplayer(game) -> bool:
-    return getattr(game, '_guest_user_id', None) is not None
+def _is_multiplayer(session) -> bool:
+    return getattr(session, '_guest_user_id', None) is not None
 
 
-def _assert_player_turn(game, current_user: Optional[str]):
-    """In a multiplayer game, ensure it's actually this user's turn."""
-    if not _is_multiplayer(game) or current_user is None:
+def _assert_player_turn(session, current_user: Optional[str]):
+    """In an authenticated multiplayer game, ensure it's actually this user's turn."""
+    if not _is_multiplayer(session) or current_user is None:
         return  # Solo game or unauthenticated – no restriction
-    active_player_idx = game.current_turn_index
-    owner = getattr(game, '_owner_user_id', None)
-    guest = getattr(game, '_guest_user_id', None)
-    # Player 0 == owner (Human seat), Player 1 == guest (previously AI seat)
-    expected_user = owner if active_player_idx == 0 else guest
+    owner = getattr(session, '_owner_user_id', None)
+    guest = getattr(session, '_guest_user_id', None)
+    # Player 0 == owner, Player 1 == guest
+    expected_user = owner if session.game.current_turn_index == 0 else guest
     if current_user != expected_user:
         raise HTTPException(status_code=403, detail="Not your turn")
 
 
+def _acting_player(session, player: Optional[str]) -> str:
+    """Which seat is acting. Defaults to the only human (vs agent) or whoever is to move."""
+    if player:
+        return player
+    humans = session.human_seats()
+    if len(humans) == 1:
+        return humans[0]
+    return session.current_player.name
+
+
+def _run_action(session, fn, *args):
+    """Runs a human action, then lets agent opponents respond."""
+    try:
+        record = fn(*args)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    agent_records = session.advance_agents() if record.ok else []
+    return record, agent_records
+
+
+def _result(session, record, agent_records):
+    return {
+        "status": "success" if record.ok else "failed",
+        "error": record.error,
+        "score_delta": record.score_delta,
+        "agent_moves": [r.__dict__ for r in agent_records],
+        "game_over": session.is_over,
+    }
+
+
+@app.get("/modes")
+def list_modes():
+    return {mode: [{"name": n, "kind": k} for n, k in seats] for mode, seats in MODES.items()}
+
+
+@app.post("/games/create")
+def create_game(body: Optional[CreateGameModel] = None,
+                current_user: Optional[str] = Depends(get_current_user)):
+    mode = body.mode if body else "human_vs_agent"
+    if mode not in MODES:
+        raise HTTPException(status_code=400, detail=f"Unknown mode '{mode}'. Choose from: {', '.join(MODES)}")
+    game_id = str(len(sessions))
+    session = GameSession(mode, CONFIG, verbose=True)
+    sessions[game_id] = session
+
+    # Track which Supabase user owns the first seat
+    session._owner_user_id = current_user
+    return {"game_id": game_id, "mode": mode, "players": [p.name for p in session.game.players]}
+
+
+@app.post("/games/{game_id}/join")
+def join_game(game_id: str, current_user: Optional[str] = Depends(get_current_user)):
+    """Second player joins a pending game, taking over the agent's seat (Human vs Agent -> Human vs Human)."""
+    session = _get_session(game_id)
+    owner = getattr(session, '_owner_user_id', None)
+    if current_user and owner == current_user:
+        raise HTTPException(status_code=400, detail="Cannot join your own game")
+    agent_seats = [n for n, s in session.seats.items() if s.kind != HUMAN]
+    if len(agent_seats) != 1 or _is_multiplayer(session):
+        raise HTTPException(status_code=400, detail="Game has no open seat")
+    session.make_seat_human(agent_seats[0], "Guest")
+    session._guest_user_id = current_user
+    return {"game_id": game_id, "status": "joined", "player": "Guest"}
+
+@app.get("/games/{game_id}")
+def get_game(game_id: str):
+    return game_to_model(_get_session(game_id))
+
+@app.post("/games/{game_id}/validate_move")
+def validate_move(game_id: str, move: MoveModel):
+    session = _get_session(game_id)
+    _, error = session.game.evaluate_play(_tiles_from_model(move), move.direction or "H")
+    return {"valid": error is None, "reason": error}
+
+
+@app.post("/games/{game_id}/draw_equals")
+def draw_equals(game_id: str, player: Optional[str] = None,
+                current_user: Optional[str] = Depends(get_current_user)):
+    session = _get_session(game_id)
+    _assert_player_turn(session, current_user)
+    current_player = session.player(_acting_player(session, player))
+    success = session.game.draw_equals_tile(current_player)
+    return {"success": success}
+
+
+@app.post("/games/{game_id}/swap")
+def swap_tiles(game_id: str, swap_data: SwapModel, player: Optional[str] = None,
+               current_user: Optional[str] = Depends(get_current_user)):
+    session = _get_session(game_id)
+    _assert_player_turn(session, current_user)
+    record, agent_records = _run_action(
+        session, session.swap, _acting_player(session, player), swap_data.tile_indices)
+    return _result(session, record, agent_records)
+
+
+@app.post("/games/{game_id}/pass")
+def pass_turn(game_id: str, player: Optional[str] = None,
+              current_user: Optional[str] = Depends(get_current_user)):
+    session = _get_session(game_id)
+    _assert_player_turn(session, current_user)
+    record, agent_records = _run_action(session, session.pass_turn, _acting_player(session, player))
+    return _result(session, record, agent_records)
+
+
 @app.post("/games/{game_id}/play")
-def play_move(game_id: str, move: MoveModel, current_user: Optional[str] = Depends(get_current_user)):
-    if game_id not in games:
-        raise HTTPException(status_code=404, detail="Game not found")
-    game = games[game_id]
-    _assert_player_turn(game, current_user)
+def play_move(game_id: str, move: MoveModel, player: Optional[str] = None,
+              current_user: Optional[str] = Depends(get_current_user)):
+    session = _get_session(game_id)
+    _assert_player_turn(session, current_user)
+    record, agent_records = _run_action(
+        session, session.play, _acting_player(session, player),
+        _tiles_from_model(move), move.direction or "H")
+    log_game_state(game_id, session, "MOVE_PLAYED", {"move": move.dict(), "success": record.ok})
+    return _result(session, record, agent_records)
 
-    # 1. Convert MoveModel to Move object
-    tiles_to_play = []
-    for p in move.tiles_to_play:
-        tile_data = p['tile']
-        tile = Tile(symbol=tile_data['symbol'], points=tile_data['points'], expr_multiplier=tile_data['expr_multiplier'])
-        tiles_to_play.append((p['r'], p['c'], tile))
 
-    # Use direction from frontend
-    direction = move.direction or "H"
-    engine_move = Move(tiles_to_play=tiles_to_play, direction=direction)
+@app.post("/games/{game_id}/agent_step")
+def agent_step(game_id: str):
+    """Plays one turn for whichever agent is to move (watch an agent-vs-agent game unfold)."""
+    session = _get_session(game_id)
+    record = session.step_agent()
+    if record is None:
+        raise HTTPException(status_code=400, detail="It is not an agent's turn (or the game is over)")
+    return {"move": record.__dict__, "game_over": session.is_over}
 
-    # 2. Determine active player
-    active_player = game.players[game.current_turn_index]
-    success = game.execute_move(active_player, engine_move)
 
-    if success and not game.is_game_over and not _is_multiplayer(game):
-        # 3. Trigger AI move in solo games
-        ai_player = next(p for p in game.players if p.name == "AI_Opponent")
-        bot = agents[game_id]
-        ai_move = bot.handle_turn(game)
-        game.execute_move(ai_player, ai_move)
-
-    log_game_state(game_id, game, "MOVE_PLAYED", {"move": move.dict(), "success": success})
-
-    return {"status": "success" if success else "failed"}
+@app.post("/games/{game_id}/autoplay")
+def autoplay(game_id: str):
+    """Agent-vs-agent: plays the game to completion and returns the final results."""
+    session = _get_session(game_id)
+    try:
+        session.run_to_completion()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"results": session.game.get_final_results(), "end_reason": session.game.end_reason,
+            "winners": session.game.winners}
 
 static_dir = "web/frontend/dist" if os.path.exists("web/frontend/dist") else "web/static"
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")

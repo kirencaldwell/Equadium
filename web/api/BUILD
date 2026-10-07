@@ -5,6 +5,7 @@ py_library(
     name = "api_lib",
     srcs = ["main.py", "models.py"],
     deps = [
+        "//core:session",
         "//core:game_manager",
         "//core:game_config",
         requirement("fastapi"),

@@ -1,4 +1,4 @@
-load("@rules_python//python:defs.bzl", "py_binary", "py_library")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("@pypi//:requirements.bzl", "requirement")
 
 package(default_visibility = ["//visibility:public"])
@@ -36,6 +36,27 @@ py_library(
 )
 
 py_library(
+    name = "search_agent",
+    srcs = ["search_agent.py"],
+    deps = [
+        ":game_entities",
+        requirement("sympy"),
+    ],
+)
+
+py_library(
+    name = "session",
+    srcs = ["session.py"],
+    deps = [
+        ":ai_agent",
+        ":search_agent",
+        ":game_manager",
+        ":game_config",
+        ":math_playbook",
+    ],
+)
+
+py_library(
     name = "game_manager",
     srcs = ["game_manager.py"],
     deps = [
@@ -52,9 +73,27 @@ py_binary(
     deps = [
         ":game_manager",
         ":game_entities",
-        ":ai_agent",
-        ":math_playbook",
+        ":search_agent",
         requirement("sympy"),
+    ],
+)
+
+py_binary(
+    name = "stress_test",
+    srcs = ["stress_test.py"],
+    deps = [
+        ":session",
+        ":game_config",
+    ],
+)
+
+py_test(
+    name = "test_game",
+    srcs = ["test_game.py"],
+    deps = [
+        ":session",
+        ":search_agent",
+        requirement("pytest"),
     ],
 )
 

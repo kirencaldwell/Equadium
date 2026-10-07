@@ -1,7 +1,7 @@
-from core.game_entities import Board, Player, Tile, make_tile
+from core.game_entities import Board, Move, Player, Tile, make_tile
 from core.math_engine import MathEngine
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, List, Optional, Tuple
 from core.math_playbook import MathPlaybook
 import sys
 
@@ -14,29 +14,20 @@ def run_autonomous_game(player_names, agents, config: dict,
 
     game = EquadiumGame(player_names, config, verbose=verbose)
 
-    center_r = config["board_dimensions"][0] // 2
-    center_c = config["board_dimensions"][1] // 2
-    game.board.grid[center_r][center_c] = make_tile("x", config)
-
+    # Count attempts (not completed turns) so a bot that keeps submitting
+    # illegal moves can't spin forever.
     max_turns = config.get("max_turns", 75)
-    turn = 0
-    while turn < max_turns:
-        if game.is_game_over:
-            break
+    attempts = 0
+    while attempts < max_turns * 2 and not game.is_game_over:
         current_player = game.players[game.current_turn_index]
         bot = agents[current_player.name]
 
         move = bot.handle_turn(game)
-        game.execute_move(current_player, move)
-        turn += 1
+        if not game.execute_move(current_player, move):
+            game.execute_move(current_player, Move())  # illegal -> forced pass
+        attempts += 1
 
-    # Determine end reason
-    if any(len(p.rack) == 0 for p in game.players):
-        end_reason = "rack empty"
-    elif not game.tile_bag and game.consecutive_non_plays >= len(game.players):
-        end_reason = "bag empty+stuck"
-    else:
-        end_reason = "game over"
+    end_reason = game.end_reason or "game over"
 
     scores = "  |  ".join(f"{p.name}: {p.score} pts" for p in game.players)
 
@@ -59,7 +50,7 @@ class PlayerStats:
         return self.total_expression_length / self.expressions_played
 
 class EquadiumGame:
-    def __init__(self, player_names, config, verbose: bool = False):
+    def __init__(self, player_names, config, verbose: bool = False, seed_center: bool = True):
         self.config = config
         self.verbose = verbose
         self.board = Board(*self.config["board_dimensions"])
@@ -82,19 +73,120 @@ class EquadiumGame:
         for player in self.players:
             self.draw_tiles(player)
 
+        # Every game starts from a seed tile in the middle so that plays have
+        # something to connect to.
+        if seed_center:
+            self.board.grid[self.board.height // 2][self.board.width // 2] = make_tile("x", config)
+
+        # Human-readable reason the most recent move was rejected (or None)
+        self.last_error: Optional[str] = None
+
     @property
     def is_game_over(self) -> bool:
         """
         The game ends when:
           1. Any player's rack is empty (they've exhausted their tiles), OR
           2. The bag is empty AND all players are stuck
-             (consecutive non-play turns >= number of players).
+             (consecutive non-play turns >= number of players), OR
+          3. Nobody has played for `stall_rounds` full rounds, OR
+          4. The turn limit (`max_turns`) is reached.
         """
+        return self.end_reason is not None
+
+    @property
+    def end_reason(self) -> Optional[str]:
+        """Why the game is over, or None if it is still in progress."""
         if any(len(p.rack) == 0 for p in self.players):
-            return True
+            return "rack empty"
         if not self.tile_bag and self.consecutive_non_plays >= len(self.players):
-            return True
-        return False
+            return "bag empty+stuck"
+        # With a few tiles left in the bag, players can swap them back and forth forever.
+        stall_rounds = self.config.get("stall_rounds", 3)
+        if stall_rounds and self.consecutive_non_plays >= stall_rounds * len(self.players):
+            return "stalled"
+        if self.turns_played >= self.config.get("max_turns", 75):
+            return "turn limit"
+        return None
+
+    @property
+    def winners(self) -> List[str]:
+        """Names of the highest scorer(s); more than one means a tie."""
+        top = max(p.score for p in self.players)
+        return [p.name for p in self.players if p.score == top]
+
+    # ------------------------------------------------------------------
+    # Placement rules (geometry only; the math is checked separately)
+    # ------------------------------------------------------------------
+    def check_placement(self, move_tiles, direction) -> Optional[str]:
+        """
+        Returns an error string if the tiles can't legally be placed on the
+        board, else None. move_tiles is a list of (row, col, tile).
+        """
+        board = self.board
+        if not move_tiles:
+            return "No tiles were placed"
+        if direction not in ("H", "V"):
+            return "Direction must be 'H' or 'V'"
+
+        coords = [(r, c) for r, c, _ in move_tiles]
+        if len(set(coords)) != len(coords):
+            return "Two tiles were placed on the same square"
+        for r, c in coords:
+            if not (0 <= r < board.height and 0 <= c < board.width):
+                return "A tile was placed off the board"
+            if board.grid[r][c] is not None:
+                return "A tile was placed on an occupied square"
+
+        rows = {r for r, _ in coords}
+        cols = {c for _, c in coords}
+        if direction == "H" and len(rows) > 1:
+            return "Tiles must all be in one row"
+        if direction == "V" and len(cols) > 1:
+            return "Tiles must all be in one column"
+
+        # Contiguity: gaps between placed tiles must be filled by existing tiles
+        dr, dc = (0, 1) if direction == "H" else (1, 0)
+        placed = set(coords)
+        lo, hi = min(coords), max(coords)
+        r, c = lo
+        while (r, c) != (hi[0] + dr, hi[1] + dc):
+            if (r, c) not in placed and board.grid[r][c] is None:
+                return "Tiles must form one unbroken line"
+            r, c = r + dr, c + dc
+
+        # Connectivity: must touch at least one tile already on the board
+        def touches_board(r, c):
+            for nr, nc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
+                if 0 <= nr < board.height and 0 <= nc < board.width and board.grid[nr][nc] is not None:
+                    return True
+            return False
+
+        board_empty = all(t is None for row in board.grid for t in row)
+        if not board_empty and not any(touches_board(r, c) for r, c in coords):
+            return "Play must connect to tiles already on the board"
+        return None
+
+    def evaluate_play(self, move_tiles, direction) -> Tuple[Optional[list], Optional[str]]:
+        """
+        Dry-runs a play without changing any state. Returns
+        (equations_data, None) if legal or (None, reason) if not.
+        """
+        err = self.check_placement(move_tiles, direction)
+        if err:
+            return None, err
+
+        self.board.place_tiles_temporarily(move_tiles)
+        try:
+            equations_data = self.board.get_all_new_equations(move_tiles, direction)
+            if not equations_data:
+                return None, "Play does not form any equation"
+            for eq_str, _ in equations_data:
+                valid, msg = self.math.validate_equation(eq_str)
+                if not valid:
+                    return None, f"'{eq_str}' is not a valid equation ({msg})"
+        finally:
+            self._rollback(move_tiles)
+        return equations_data, None
 
     def display_scoreboard(self):
         """Prints a clean status update of the current game standings."""
@@ -179,7 +271,9 @@ class EquadiumGame:
 
     def execute_move(self, player, move, tiles_to_swap=None):
         """Executes a Move object on behalf of the player."""
+        self.last_error = None
         if player != self.players[self.current_turn_index]:
+            self.last_error = f"It is not {player.name}'s turn"
             if self.verbose:
                 print(f"⚠️ It is not {player.name}'s turn!")
             return False
@@ -188,6 +282,7 @@ class EquadiumGame:
             return self.pass_turn(player)
 
         if move.is_swap:
+            tiles_to_swap = tiles_to_swap or move.tiles_to_swap
             if tiles_to_swap:
                 self.swap_tiles(player, tiles_to_swap)
                 return True
@@ -244,10 +339,12 @@ class EquadiumGame:
             extra_equals_needed = equals_needed - equals_in_rack
             if extra_equals_needed == 1 and player.equals_available:
                 if not self.draw_equals_tile(player):
+                    self.last_error = "The equals pile is empty"
                     if self.verbose:
                         print("⚠️ Cannot execute play: Equals pile is empty!")
                     return False
             else:
+                self.last_error = "No '=' tile available (only one free '=' per turn)"
                 if self.verbose:
                     print("⚠️ Cannot execute play: Missing '=' tile or resource already used!")
                 return False
@@ -266,6 +363,7 @@ class EquadiumGame:
                 break
 
         if not can_play:
+            self.last_error = "Your rack does not contain all of those tiles"
             if self.verbose:
                 print("⚠️ Cannot execute play: Rack does not contain all required tiles!")
             return False
@@ -289,15 +387,10 @@ class EquadiumGame:
         if player != self.players[self.current_turn_index]:
             return False
 
-        self.board.place_tiles_temporarily(move_tiles)
-        equations_data = self.board.get_all_new_equations(move_tiles, direction)
-        
-        # Math verification
-        all_valid = True
-        for eq_str, eq_tiles in equations_data:
-            if not self.math.validate_equation(eq_str)[0]:
-                all_valid = False
-                break
+        equations_data, error = self.evaluate_play(move_tiles, direction)
+        all_valid = error is None
+        if not all_valid:
+            self.last_error = error
         if all_valid:
             # Check if this specific play included an '=' sign
             # If the user/AI placed an '=' tile, consume the resource
@@ -337,10 +430,10 @@ class EquadiumGame:
             self._advance_turn()
             if self.verbose:
                 self.display_game_state()
+            # Tiles go on the board only once the play is accepted
+            self.board.place_tiles_temporarily(move_tiles)
             return True
-        else:
-            self._rollback(move_tiles)
-            return False
+        return False
 
     def _rollback(self, move_tiles):
         coords_to_remove = [(r, c) for r, c, _ in move_tiles]

@@ -6,6 +6,7 @@ CONFIG = {
     "max_rack_size": 15,
     "require_plus_c": True,
     "max_turns": 75,
+    "stall_rounds": 3,  # game ends after this many full rounds with no tiles played (0 = off)
     "tiles": {
         # Variables & Polynomials
         "x": {"count": 6, "points": 1},
