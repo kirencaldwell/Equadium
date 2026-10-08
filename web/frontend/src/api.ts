@@ -1,7 +1,10 @@
 import type { GameState, Mode, Placed, Preview } from './types';
 
+// Empty in dev (Vite proxies to the local API); set VITE_API_URL to the hosted API in production.
+const BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
+
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(url, init);
+    const res = await fetch(BASE + url, init);
     if (!res.ok) {
         let detail = res.statusText;
         try { detail = (await res.json()).detail ?? detail; } catch { /* not json */ }

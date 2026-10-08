@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import List, Optional
 
 import jwt  # PyJWT
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
@@ -64,6 +65,15 @@ logging.basicConfig(
 logger = logging.getLogger("equadium_beta")
 
 app = FastAPI()
+
+# The frontend (e.g. on Vercel) calls this API from another origin.
+# ALLOWED_ORIGINS is a comma-separated list, e.g. "https://equadium.vercel.app".
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",")],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 sessions = {}  # game_id -> GameSession (simple in-memory storage)
 
