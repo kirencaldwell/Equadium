@@ -166,6 +166,18 @@ class EquadiumGame:
             return "Play must connect to tiles already on the board"
         return None
 
+    @staticmethod
+    def score_play(equations_data, move_tiles) -> int:
+        """Points for a play: each equation's tile points, times the multipliers of newly placed tiles in it."""
+        total = 0
+        for _, eq_tiles in equations_data:
+            multiplier = 1
+            for _, _, placed_tile in move_tiles:
+                if placed_tile in eq_tiles:
+                    multiplier *= placed_tile.expr_multiplier
+            total += sum(t.points for t in eq_tiles) * multiplier
+        return total
+
     def evaluate_play(self, move_tiles, direction) -> Tuple[Optional[list], Optional[str]]:
         """
         Dry-runs a play without changing any state. Returns
@@ -398,17 +410,7 @@ class EquadiumGame:
             if used_equals:
                 player.equals_available = False
             
-            # Calculate score for the play
-            play_score = 0
-            for eq_str, eq_tiles in equations_data:
-                eq_points = sum(tile.points for tile in eq_tiles)
-                # Multipliers from newly placed tiles in this equation
-                multiplier = 1
-                for _, _, placed_tile in move_tiles:
-                    if placed_tile in eq_tiles:
-                        multiplier *= placed_tile.expr_multiplier
-                play_score += eq_points * multiplier
-            
+            play_score = self.score_play(equations_data, move_tiles)
             player.score += play_score
 
             # --- Record statistics ---

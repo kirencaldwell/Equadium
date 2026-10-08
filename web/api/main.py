@@ -145,6 +145,7 @@ def game_to_model(session):
         "winners": game.winners if game.is_game_over else [],
         "turns_played": game.turns_played,
         "bag_count": len(game.tile_bag),
+        "last_move": session.history[-1].__dict__ if session.history else None,
     }
 
 def _get_session(game_id: str) -> GameSession:
@@ -247,8 +248,14 @@ def get_game(game_id: str):
 @app.post("/games/{game_id}/validate_move")
 def validate_move(game_id: str, move: MoveModel):
     session = _get_session(game_id)
-    _, error = session.game.evaluate_play(_tiles_from_model(move), move.direction or "H")
-    return {"valid": error is None, "reason": error}
+    tiles = _tiles_from_model(move)
+    equations, error = session.game.evaluate_play(tiles, move.direction or "H")
+    return {
+        "valid": error is None,
+        "reason": error,
+        "equations": [eq for eq, _ in equations] if equations else [],
+        "score": session.game.score_play(equations, tiles) if equations else 0,
+    }
 
 
 @app.post("/games/{game_id}/draw_equals")
@@ -313,6 +320,13 @@ def autoplay(game_id: str):
     return {"results": session.game.get_final_results(), "end_reason": session.game.end_reason,
             "winners": session.game.winners}
 
-static_dir = "web/frontend/dist" if os.path.exists("web/frontend/dist") else "web/static"
-app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
-
+# Production: serve the built frontend (cd web/frontend && npm run build).
+# In development run `npm run dev` instead; Vite proxies API calls here.
+_dist = "web/frontend/dist"
+if os.path.exists(_dist):
+    app.mount("/", StaticFiles(directory=_dist, html=True), name="static")
+else:
+    @app.get("/")
+    def root():
+        return {"message": "Equadium API is running. Build the frontend with `cd web/frontend && npm run build`, "
+                           "or run `npm run dev` for development."}

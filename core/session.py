@@ -69,6 +69,7 @@ class TurnRecord:
     score_delta: int = 0
     error: Optional[str] = None
     tiles: Optional[List[str]] = None
+    cells: Optional[List[List[int]]] = None   # [row, col] of each tile placed
 
 
 class GameSession:
@@ -172,13 +173,14 @@ class GameSession:
         turns_before = self.game.turns_played
         ok = self.game.execute_move(player, move)
         return self._record(player, action, ok, score_before, turns_before,
-                            tiles=[t.symbol for _, _, t in move.tiles_to_play] or None)
+                            tiles=[t.symbol for _, _, t in move.tiles_to_play] or None,
+                            cells=[[r, c] for r, c, _ in move.tiles_to_play] or None)
 
-    def _record(self, player, action, ok, score_before, turns_before, tiles=None) -> TurnRecord:
+    def _record(self, player, action, ok, score_before, turns_before, tiles=None, cells=None) -> TurnRecord:
         rec = TurnRecord(
             player=player.name, action=action, ok=ok,
             score_delta=(player.score - score_before) if action == "play" else 0,
-            error=None if ok else self.game.last_error, tiles=tiles,
+            error=None if ok else self.game.last_error, tiles=tiles, cells=cells,
         )
         if ok:
             self.history.append(rec)
@@ -206,7 +208,8 @@ class GameSession:
             self.history.append(rec)
             return rec
         return self._record(player, action, True, score_before, turns_before,
-                            tiles=[t.symbol for _, _, t in move.tiles_to_play] or None)
+                            tiles=[t.symbol for _, _, t in move.tiles_to_play] or None,
+                            cells=[[r, c] for r, c, _ in move.tiles_to_play] or None)
 
     def advance_agents(self, limit: int = 10) -> List[TurnRecord]:
         """Runs agent turns until a human is to move or the game ends."""

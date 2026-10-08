@@ -15,6 +15,16 @@ All three run on the same engine (`core/session.py`), so what is stress-tested i
 Other endpoints: `GET /modes`, `GET /games/{id}`, `POST /games/{id}/validate_move` (returns a `reason` when illegal).
 A rejected `play` returns `{"status": "failed", "error": "..."}` and does not consume the turn.
 
+## Running the app
+
+```
+pip install -r requirements.txt
+python -m uvicorn web.api.main:app --port 8000      # API
+cd web/frontend && npm install && npm run dev        # UI at http://localhost:3000 (proxies the API)
+```
+For production, `npm run build` and the API serves `web/frontend/dist` itself.
+Sign-in/online play is paused for now; the home screen offers solo, pass-and-play and bot-watching.
+
 ## Stress testing
 
 ```
