@@ -291,10 +291,10 @@ function homeHtml(): string {
     return `
     <main class="home">
         <div class="home-tiles" aria-hidden="true">
-            ${['x', '=', '2', 'x'].map((s, i) => tileHtml({ symbol: s, points: [1, 0, 1, 1][i], expr_multiplier: 1 }, 'big')).join('')}
+            ${[['d/dx(', 3, 2], ['x**2', 2, 1], [')', 0, 1], ['=', 0, 1], ['2', 1, 1], ['x', 1, 1]].map(([s, p, m]) => tileHtml({ symbol: s as string, points: p as number, expr_multiplier: m as number }, 'big')).join('')}
         </div>
         <h1 class="wordmark">Equadium</h1>
-        <p class="tagline">The equation-building word game.</p>
+        <p class="tagline">A calculus game</p>
         <div class="modes">
             ${card('human_vs_agent', '🧮', 'Play the Computer', 'Solo. Out-build the bot.')}
             ${card('human_vs_human', '🤝', 'Pass &amp; Play', 'Two players, one screen.')}
@@ -463,7 +463,7 @@ function modalHtml(): string {
                 <li><b>Build equations</b> across and down, like a crossword. Both sides must be equal: <span class="eg">${equation('x+x=2x')}</span></li>
                 <li>Every play must <b>connect</b> to tiles already on the board.</li>
                 <li>You get <b>one free <span class="eg">=</span></b> each turn.</li>
-                <li><span class="eg">${equation('d/dx(')}</span> and <span class="eg">∫(</span> tiles multiply your score by <b>×2</b> and <b>×3</b>. An integral needs <span class="eg">+C</span>.</li>
+                <li><span class="eg">${equation('d/dx(')}</span> and <span class="eg">∫(</span> tiles multiply your score by <b>×2</b> and <b>×3</b>. An integral needs <span class="eg">+C</span>. Stack two <span class="eg">${equation('d/dx(')}</span> tiles for a second derivative and <b>×4</b>.</li>
                 <li>The game ends when someone runs out of tiles, or nobody can play.</li>
             </ol>
             <button class="primary" data-act="close">Got it</button>`;

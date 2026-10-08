@@ -46,6 +46,9 @@ TILES_TO_GENERATE = {
     "(x+b)":  ("mono",     "(x+b)",  26),
     "e^x":    ("mono",     "eˣ",     40),
     "cos(x)": ("mono",     "cos",    36),
+    "ln(x)":  ("mono",     "ln",     36),
+    "1/x":    ("fraction", ("1", "x"),   None),
+    "k":      ("mono",     "k",      44),
     # Numbers
     "2":      ("text",     "2",      44),
     "3":      ("text",     "3",      44),

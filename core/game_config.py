@@ -19,12 +19,15 @@ CONFIG = {
         "exp(": {"count": 3, "points": 3},
         "sin(x)": {"count": 4, "points": 5},
         "cos(x)": {"count": 4, "points": 5},
+        "ln(x)": {"count": 3, "points": 5},
+        "1/x": {"count": 3, "points": 3},
         #"sin(": {"count": 4, "points": 5},
         #"cos(": {"count": 4, "points": 5},
         
         # Numbers & Basic Operators
         "a": {"count": 4, "points": 1},
         "b": {"count": 4, "points": 1},
+        "k": {"count": 4, "points": 1},
         "2": {"count": 6, "points": 1},
         "3": {"count": 4, "points": 1},
         "4": {"count": 4, "points": 1},
