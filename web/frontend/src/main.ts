@@ -6,7 +6,11 @@ import { createClient, RealtimeChannel, Session, User } from '@supabase/supabase
 // ─────────────────────────────────────────────
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Without credentials createClient() throws at load time and kills the whole
+// script (the login button would silently do nothing), so only create it when
+// configured and fall back to guest play otherwise.
+const supabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+const supabase = supabaseConfigured ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
 // ─────────────────────────────────────────────
 // Types
@@ -179,19 +183,42 @@ function clearUserHeader() {
 // ─────────────────────────────────────────────
 // Auth events
 // ─────────────────────────────────────────────
+const authMessageEl = document.getElementById('auth-message') as HTMLParagraphElement;
+const guestBtn = document.getElementById('guest-btn') as HTMLButtonElement;
+
+function showAuthMessage(msg: string) {
+    authMessageEl.textContent = msg;
+    authMessageEl.style.display = msg ? 'block' : 'none';
+}
+
+if (!supabase) {
+    showAuthMessage('Sign-in is not configured (set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in web/frontend/.env). You can still play as a guest.');
+    console.warn('Supabase env vars missing; Google sign-in disabled.');
+}
+
 googleLoginBtn.addEventListener('click', async () => {
-    await supabase.auth.signInWithOAuth({
+    if (!supabase) {
+        showAuthMessage('Sign-in is not configured. Use "Play as guest" or add Supabase keys to web/frontend/.env.');
+        return;
+    }
+    const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: { redirectTo: window.location.origin }
     });
+    if (error) showAuthMessage(`Sign-in failed: ${error.message}`);
+});
+
+guestBtn.addEventListener('click', () => {
+    hideAuthOverlay();
+    createNewGame();
 });
 
 logoutBtn.addEventListener('click', async () => {
-    await supabase.auth.signOut();
+    await supabase?.auth.signOut();
 });
 
 // Listen for auth state changes (login, logout, token refresh)
-supabase.auth.onAuthStateChange((_event, session) => {
+supabase?.auth.onAuthStateChange((_event, session) => {
     currentSession = session;
     if (session) {
         hideAuthOverlay();
@@ -206,6 +233,7 @@ supabase.auth.onAuthStateChange((_event, session) => {
 
 // Hydrate session on page load
 (async () => {
+    if (!supabase) return;
     const { data } = await supabase.auth.getSession();
     currentSession = data.session;
     if (currentSession) {
@@ -220,6 +248,7 @@ supabase.auth.onAuthStateChange((_event, session) => {
 // ─────────────────────────────────────────────
 function subscribeToGame(id: string) {
     teardownRealtime();
+    if (!supabase) return;
     realtimeChannel = supabase
         .channel(`game:${id}`)
         .on(
@@ -235,7 +264,7 @@ function subscribeToGame(id: string) {
 
 function teardownRealtime() {
     if (realtimeChannel) {
-        supabase.removeChannel(realtimeChannel);
+        supabase?.removeChannel(realtimeChannel);
         realtimeChannel = null;
     }
 }
@@ -248,6 +277,7 @@ function setMatchmakingStatus(msg: string) {
 }
 
 async function loadPendingGames() {
+    if (!supabase) return;
     const { data, error } = await supabase
         .from('games')
         .select('id, created_at, current_turn_player_id')
