@@ -42,10 +42,31 @@ app = FastAPI()
 # The frontend (e.g. on Vercel) calls this API from another origin.
 # ALLOWED_ORIGINS is a comma-separated list, e.g. "https://equadium.vercel.app".
 from web.api import rooms, me  # noqa: E402  (after app setup is fine; no circular import)
+from fastapi.responses import JSONResponse  # noqa: E402
+
+
+def _cors_origins(value: Optional[str]) -> List[str]:
+    """Parses ALLOWED_ORIGINS. Browsers send origins with no trailing slash, so a pasted
+    'https://site.vercel.app/' would never match; normalise it. Empty means any origin."""
+    origins = [o.strip().rstrip("/") for o in (value or "").split(",") if o.strip()]
+    return origins or ["*"]
+
+
+@app.middleware("http")
+async def turn_crashes_into_json_errors(request: Request, call_next):
+    """Catch unexpected errors *inside* the CORS layer. An unhandled exception would otherwise
+    produce a bare 500 with no CORS headers, which browsers report as a misleading 'blocked by
+    CORS policy' and hides the real problem. (Added before CORSMiddleware so CORS wraps it.)"""
+    try:
+        return await call_next(request)
+    except Exception:
+        logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+        return JSONResponse({"detail": "Internal server error"}, status_code=500)
+
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",")],
+    allow_origins=_cors_origins(os.getenv("ALLOWED_ORIGINS")),
     allow_methods=["*"],
     allow_headers=["*"],
 )

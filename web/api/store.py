@@ -197,8 +197,14 @@ def get_store() -> Store:
         pid = os.getenv("FIREBASE_PROJECT_ID")
         creds = os.getenv("FIREBASE_SERVICE_ACCOUNT")
         if pid and (creds or os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("FIRESTORE_EMULATOR_HOST")):
-            _store = FirestoreStore(pid, creds)
-            logger.info("Saving games to Firestore (project %s)", pid)
+            try:
+                _store = FirestoreStore(pid, creds)
+                logger.info("Saving games to Firestore (project %s)", pid)
+            except Exception:
+                # Bad or missing credentials must not take the whole game down: keep playing from memory.
+                logger.exception("FIRESTORE IS CONFIGURED BUT FAILED TO START (check FIREBASE_SERVICE_ACCOUNT / "
+                                 "GOOGLE_APPLICATION_CREDENTIALS). Games will NOT be saved until this is fixed.")
+                _store = MemoryStore()
         else:
             _store = MemoryStore()
             logger.info("Firestore not configured; saved games live in memory only")

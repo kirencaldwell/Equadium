@@ -537,3 +537,35 @@ def test_firestore_is_chosen_only_when_fully_configured(monkeypatch):
     store_mod.set_store(None)
     monkeypatch.setenv("FIREBASE_PROJECT_ID", PID)                              # project but no credentials: don't guess
     assert store_mod.get_store().name == "memory"
+
+
+# ── resilience: a broken backend must never look like a CORS problem or break a game ──
+def test_store_that_fails_to_initialise_never_breaks_play(monkeypatch):
+    """E.g. FIREBASE_SERVICE_ACCOUNT / GOOGLE_APPLICATION_CREDENTIALS pointing at a missing file."""
+    from web.api import store as store_mod
+    set_store(None)
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT", raising=False)
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/nonexistent/firebase.json")
+    safe = TestClient(main.app, raise_server_exceptions=False)
+    r = safe.post("/games/create", json={"mode": "human_vs_agent"}, headers=H())
+    assert r.status_code == 200, r.text
+    gid = r.json()["game_id"]
+    assert safe.post(f"/games/{gid}/pass", headers=H()).json()["status"] == "success"
+    assert store_mod.get_store().name == "memory"          # degraded loudly (logged), but still playing
+
+
+def test_server_errors_still_carry_cors_headers(monkeypatch):
+    """Without this, any 500 shows up in the browser as a misleading 'blocked by CORS policy'."""
+    def boom(*a, **k):
+        raise RuntimeError("kaboom")
+    monkeypatch.setattr(main, "GameSession", boom)
+    safe = TestClient(main.app, raise_server_exceptions=False)
+    r = safe.post("/games/create", json={"mode": "human_vs_agent"}, headers={"Origin": "https://equadium.vercel.app"})
+    assert r.status_code == 500
+    assert r.headers.get("access-control-allow-origin") in ("*", "https://equadium.vercel.app")
+    assert "kaboom" not in r.text                           # no internals leaked to the client
+
+
+def test_allowed_origins_tolerate_trailing_slashes_and_spaces():
+    assert main._cors_origins("https://a.vercel.app/, http://localhost:3000 ,") == ["https://a.vercel.app", "http://localhost:3000"]
+    assert main._cors_origins("") == ["*"] and main._cors_origins(None) == ["*"]
