@@ -2,6 +2,7 @@ import './style.css';
 import { api, me, room } from './api';
 import { authAvailable, initAuth, signInWithGoogle, signOut, takePendingRoom, type User } from './auth';
 import { equation, tileHtml } from './tiles';
+import { currentState, parseHash, pushModal, pushRoute, replaceRoute, sameRoute, type Route } from './nav';
 import type { GameState, Mode, Placed, Preview, SavedGame, Stats, Tile } from './types';
 
 // ─────────────────────────────────────────────
@@ -110,6 +111,136 @@ function resetTurnState() {
 }
 
 // ─────────────────────────────────────────────
+// Navigation: every screen is a history entry, so the browser's Back/Forward buttons (and a phone's back
+// gesture) move between screens instead of leaving the site. See nav.ts for the URL scheme.
+// ─────────────────────────────────────────────
+const DISMISSABLE = new Set(['help', 'swap', 'pass', 'account']);
+let modalEntry = false;   // the top history entry is a pop-up we pushed, so Back should just close it
+let swallowPop = 0;       // popstate events we caused ourselves (closing a pop-up); ignored by the handler
+
+/** The route for what is on screen right now. */
+function shownRoute(): Route {
+    if (S.screen === 'game') {
+        return S.online ? { screen: 'game', kind: 'room', code: S.online.code } : { screen: 'game', kind: 'solo', id: S.gameId ?? '' };
+    }
+    return { screen: S.screen };
+}
+
+/**
+ * Records a user-initiated move to `route`. Leaving a game or the online form *replaces* its entry rather
+ * than stacking it, so Back never lands on a dead screen (e.g. the finished game you just left, or the
+ * form you filled in to start one). A move made from an open pop-up replaces the pop-up's entry.
+ */
+function go(route: Route) {
+    if (modalEntry) { modalEntry = false; replaceRoute(route); return; }
+    if (sameRoute(route, currentState().route)) return;
+    if (S.screen === 'game' || S.screen === 'online') replaceRoute(route);
+    else pushRoute(route);
+}
+
+function openModal(m: NonNullable<typeof S.modal>) {
+    S.modal = m;
+    if (DISMISSABLE.has(m) && !modalEntry) { pushModal(m); modalEntry = true; }   // Back now closes it
+    render();
+}
+
+function closeModal() {
+    S.modal = S.game?.game_over ? 'over' : null;
+    if (modalEntry) { modalEntry = false; swallowPop++; history.back(); }          // drop the pop-up's entry
+    render();
+}
+
+function leaveGame() {
+    stopWatching();
+    stopPolling();
+    S.online = null;
+    S.gameId = null;
+    S.game = null;
+}
+
+function showHome() {
+    leaveGame();
+    S.screen = 'home';
+    S.modal = null;
+    S.toast = '';
+    render();
+    void loadSavedGames();
+}
+
+function showOnline() {
+    go({ screen: 'online' });
+    leaveGame();
+    S.screen = 'online';
+    S.modal = null;
+    render();
+}
+
+/** Back to the menu: step back in history when we can, so the browser's stack stays what the user expects. */
+function goHome() {
+    if (currentState().idx > 0) { history.back(); return; }   // the popstate handler shows the home screen
+    replaceRoute({ screen: 'home' });
+    showHome();
+}
+
+/** A route we can't show (expired game, signed out): put the menu in its place without adding an entry. */
+function failToHome() {
+    replaceRoute({ screen: 'home' });
+    showHome();
+}
+
+/** Shows `route` without touching history (used by Back/Forward and on page load). */
+async function applyRoute(route: Route) {
+    if (sameRoute(route, shownRoute())) {
+        S.modal = S.game?.game_over ? 'over' : null;
+        render();
+        return;
+    }
+    S.modal = null;
+    try {
+        switch (route.screen) {
+            case 'home': showHome(); break;
+            case 'online': leaveGame(); S.screen = 'online'; render(); break;
+            case 'stats': if (S.user) await openStats(false); else failToHome(); break;
+            case 'game':
+                if (route.kind === 'solo') await openSolo(route.id, false);
+                else await openRoomByCode(route.code);
+                break;
+        }
+    } catch (e) {
+        failToHome();     // first: showing the menu clears toasts
+        showToast((e as Error).message || "That game isn't available any more");
+    }
+}
+
+/** Re-enters an online game we already sit in (Back/Forward or a reload); never silently joins a new one. */
+async function openRoomByCode(code: string) {
+    const known = loadSaved()?.code === code ? loadSaved()
+        : S.saved.find(g => g.kind === 'room' && g.code === code && g.seat)
+            ? { code, seat: S.saved.find(g => g.code === code)!.seat!, token: S.saved.find(g => g.code === code)!.token ?? '' }
+            : null;
+    if (!known) { leaveGame(); S.screen = 'online'; replaceRoute({ screen: 'online' }); render(); throw new Error('Join this game from the Online screen'); }
+    await enterRoom(known, false);
+}
+
+window.addEventListener('popstate', (e) => {
+    if (swallowPop > 0) { swallowPop--; return; }
+    const st = e.state && e.state.v === 1 ? (e.state as ReturnType<typeof currentState>) : null;
+    const target = st?.route ?? parseHash(location.hash);
+    if (modalEntry) {                       // Back while a pop-up is open: close the pop-up, stay on the screen
+        modalEntry = false;
+        S.modal = S.game?.game_over ? 'over' : null;
+        if (sameRoute(target, shownRoute())) { render(); return; }
+    }
+    if (st?.modal && DISMISSABLE.has(st.modal) && sameRoute(target, shownRoute())) {   // Forward onto a pop-up
+        S.modal = st.modal as NonNullable<typeof S.modal>;
+        modalEntry = true;
+        render();
+        return;
+    }
+    void applyRoute(target);
+});
+
+// ─────────────────────────────────────────────
 // Game lifecycle
 // ─────────────────────────────────────────────
 async function startGame(mode: Mode) {
@@ -125,11 +256,13 @@ async function startGame(mode: Mode) {
 }
 
 /** Shows a solo game (new, or resumed from the account) from the server's copy. */
-async function openSolo(id: string) {
+async function openSolo(id: string, push = true) {
+    const game = await api.state(id);      // load first, so a failure leaves history untouched
+    if (push) go({ screen: 'game', kind: 'solo', id });
     stopWatching();
     stopPolling();
     S.online = null;
-    S.game = await api.state(id);
+    S.game = game;
     S.gameId = id;
     S.screen = 'game';
     S.modal = S.game.game_over ? 'over' : null;
@@ -152,7 +285,8 @@ async function loadSavedGames() {
     if (S.screen === 'home' && !S.modal) render();
 }
 
-async function openStats() {
+async function openStats(push = true) {
+    if (push) go({ screen: 'stats' });
     S.modal = null;
     S.screen = 'stats';
     S.stats = null;
@@ -161,7 +295,8 @@ async function openStats() {
         S.stats = await me.stats();
     } catch (e) {
         showToast((e as Error).message);
-        S.screen = 'home';
+        goHome();
+        return;
     }
     render();
 }
@@ -197,7 +332,7 @@ function onUserChange(user: User | null) {
     S.stats = null;
     if (user) void checkSaving();
     void loadSavedGames();
-    if (!user && S.screen === 'stats') S.screen = 'home';
+    if (!user && S.screen === 'stats') { failToHome(); return; }
     if (S.screen !== 'game') render();
 }
 
@@ -274,27 +409,26 @@ async function pollOnce() {
 
 const otherSeat = () => (S.online?.seat === 'Player1' ? 'Player2' : 'Player1');
 
-async function enterRoom(seat: OnlineSeat) {
+async function enterRoom(seat: OnlineSeat, push = true) {
+    let state: GameState;
+    let version: number;
+    try {
+        const r = await room.state(seat.code, seat.token);
+        if (!r.changed) throw new Error('Could not load the game');
+        state = r.state;
+        version = r.version;
+    } catch (e) {
+        saveSeat(null);                     // the room is gone: forget our seat so it stops offering "resume"
+        throw e;
+    }
+    if (push) go({ screen: 'game', kind: 'room', code: seat.code });   // after loading, so a failure leaves history untouched
     stopWatching();
     stopPolling();
     S.online = seat;
     S.gameId = seat.code;
-    try {
-        const r = await room.state(seat.code, seat.token);
-        if (!r.changed) throw new Error('Could not load the game');
-        S.version = r.version;
-        S.game = r.state;
-    } catch (e) {
-        S.online = null;
-        S.gameId = null;
-        saveSeat(null);
-        showToast((e as Error).message);
-        S.screen = 'home';
-        render();
-        return;
-    }
+    S.version = version;
+    S.game = state;
     saveSeat(seat);
-    history.replaceState(null, '', location.pathname);
     S.screen = 'game';
     S.modal = S.game.game_over ? 'over' : null;
     S.zoom = 1;
@@ -322,19 +456,6 @@ function readName(): string {
     const name = (el?.value ?? savedName()).trim();
     saveName(name);
     return name;
-}
-
-function goHome() {
-    stopWatching();
-    stopPolling();
-    S.online = null;
-    S.screen = 'home';
-    S.modal = null;
-    S.gameId = null;
-    S.game = null;
-    S.toast = '';
-    render();
-    void loadSavedGames();
 }
 
 // ─────────────────────────────────────────────
@@ -901,22 +1022,22 @@ app.addEventListener('click', (e) => {
         if (act === 'close-scrim' && target.closest('.modal')) return;
         switch (act) {
             case 'start': void startGame((actEl.dataset.mode as Mode)); break;
-            case 'online': stopPolling(); S.online = null; S.modal = null; S.screen = 'online'; render(); break;
+            case 'online': showOnline(); break;
             case 'online-create': void createOnline(); break;
             case 'online-join': void joinOnline((document.getElementById('code') as HTMLInputElement).value); break;
-            case 'online-resume': { const saved = loadSaved(); if (saved) void enterRoom(saved); break; }
+            case 'online-resume': { const saved = loadSaved(); if (saved) void enterRoom(saved).catch(err => showToast((err as Error).message)); break; }
             case 'copy-link':
                 void navigator.clipboard?.writeText(joinLink(S.online!.code))
                     .then(() => showToast('Invite link copied'), () => showToast(`Share this code: ${S.online!.code}`));
                 break;
             case 'signin': void signInWithGoogle().catch(err => showToast((err as Error).message)); break;
-            case 'signout': S.modal = null; void signOut().then(() => { goHome(); }); break;
-            case 'account': S.modal = 'account'; render(); break;
+            case 'signout': closeModal(); void signOut(); break;
+            case 'account': openModal('account'); break;
             case 'stats': void openStats(); break;
             case 'resume-saved': { const g = S.saved[Number(actEl.dataset.i)]; if (g) void resumeSaved(g); break; }
             case 'delete-saved': { const g = S.saved[Number(actEl.dataset.i)]; if (g) void deleteSaved(g); break; }
-            case 'help': S.modal = 'help'; render(); break;
-            case 'close': case 'close-scrim': S.modal = S.game?.game_over ? 'over' : null; render(); break;
+            case 'help': openModal('help'); break;
+            case 'close': case 'close-scrim': closeModal(); break;
             case 'home': goHome(); break;
             case 'pick': {
                 if (!myTurn()) break;
@@ -935,15 +1056,15 @@ app.addEventListener('click', (e) => {
             }
             case 'recall': recallAll(); break;
             case 'play': void play(); break;
-            case 'swap': S.swapPick.clear(); S.modal = 'swap'; render(); break;
+            case 'swap': S.swapPick.clear(); openModal('swap'); break;
             case 'swap-pick': {
                 const i = Number(actEl.dataset.i);
                 if (S.swapPick.has(i)) S.swapPick.delete(i); else S.swapPick.add(i);
                 render(); break;
             }
-            case 'swap-confirm': S.modal = null; void swap(); break;
-            case 'pass': S.modal = 'pass'; render(); break;
-            case 'pass-confirm': S.modal = null; void pass(); break;
+            case 'swap-confirm': closeModal(); void swap(); break;
+            case 'pass': openModal('pass'); break;
+            case 'pass-confirm': closeModal(); void pass(); break;
             case 'zoom-in': setZoom(S.zoom + 0.15); break;
             case 'zoom-out': setZoom(S.zoom - 0.15); break;
             case 'center': centerBoard(); break;
@@ -997,19 +1118,23 @@ document.addEventListener('keydown', (e) => {
 
 render();
 
-// Boot: restore any saved sign-in first, then handle an invite link (?room=CODE): resume if we
-// already sit in that game, otherwise offer to join.
+// Boot: restore any saved sign-in, then work out where to start: an invite link (?room=CODE) wins, otherwise
+// the URL's route, so a reload (or following a link) lands where the user was.
 void (async () => {
     S.user = await initAuth(onUserChange);
     if (S.user) { void checkSaving(); void loadSavedGames(); }
     const pending = takePendingRoom();   // an invite link survives the Google sign-in redirect
-    if (pending && !new URLSearchParams(location.search).get('room')) history.replaceState(null, '', `${location.pathname}?room=${pending}`);
-    const code = new URLSearchParams(location.search).get('room')?.toUpperCase();
-    if (code) {
+    if (pending && !new URLSearchParams(location.search).get('room')) history.replaceState(null, '', `${location.pathname}?room=${pending}#/online`);
+
+    const invite = new URLSearchParams(location.search).get('room')?.toUpperCase();
+    let route: Route = parseHash(location.hash);
+    if (invite) {
         const saved = loadSaved();
-        if (saved && saved.code === code) await enterRoom(saved);
-        else { S.screen = 'online'; render(); }
-    } else {
-        render();
+        route = saved && saved.code === invite
+            ? { screen: 'game', kind: 'room', code: invite }
+            : { screen: 'online' };        // not seated yet: the Online screen has the code pre-filled
     }
+    replaceRoute(route, route.screen === 'online' && !!invite);   // this is the first entry: adopt it, keep ?room= for the form
+    await applyRoute(route);
+    render();
 })();

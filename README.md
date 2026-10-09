@@ -105,6 +105,16 @@ A stale file is ignored (the agent still works, just slowly on small servers) an
 Each computer turn also has a soft time budget (default 6 s, `EQUADIUM_AGENT_TIME_BUDGET`): on a slow host the
 agent stops deepening and skips uncached work, so it plays slightly weaker moves instead of making you wait.
 
+## Browser Back / Forward
+
+Every screen has a URL (`#/online`, `#/stats`, `#/game/<id>`, `#/room/<CODE>`; the menu has none), so the browser's
+Back/Forward buttons and a phone's back gesture move between screens instead of leaving the site. Back also closes an
+open pop-up (help, swap, pass, account) first, and reloading restores the screen you were on. Leaving a game or the
+online form *replaces* its history entry, so Back never lands on a finished game or a half-filled form. The logic is
+in `web/frontend/src/nav.ts` and the navigation section of `src/main.ts`. To check it in a real browser:
+`cd web/frontend && npm install --no-save playwright-core && npm run e2e:nav` (needs the app and API running; see the
+header of `e2e/navigation.mjs`).
+
 ## Tests
 
 ```
