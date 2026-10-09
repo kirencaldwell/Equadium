@@ -109,6 +109,23 @@ button:disabled { cursor: default; }
 .soon { font-style: normal; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
 .link { margin-top: 26px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; font-size: 14px; }
 
+/* ───────────── Online ───────────── */
+.home.online { padding-top: 10dvh; gap: 18px; }
+.online-title { font-family: var(--serif); font-weight: 800; font-size: 30px; letter-spacing: -.02em; margin: 0; }
+.field { width: 100%; display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
+.field input, .join-row input { font: inherit; font-size: 17px; color: var(--ink); background: var(--surface); border: 1.5px solid var(--line); border-radius: 12px; padding: 12px 14px; width: 100%; }
+.field input:focus, .join-row input:focus { outline: none; border-color: var(--ink); }
+.join-row { width: 100%; display: flex; gap: 10px; }
+.join-row input { text-transform: uppercase; letter-spacing: .3em; text-align: center; font-weight: 700; font-family: var(--math); }
+.join-row .primary { flex: none; padding: 0 22px; }
+.mode-card.resume { border-style: dashed; }
+.lobby { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; }
+.lobby .code { font-family: var(--math); font-weight: 800; font-size: 64px; letter-spacing: .18em; padding-left: .18em; background: var(--t-num); color: #1a1a1a; border-radius: 16px; padding: 10px 26px 10px 36px; box-shadow: 0 5px 0 var(--t-num-edge); }
+.lobby .waiting { font-weight: 600; margin: 12px 0 0; }
+.lobby .small { font-size: 13px; max-width: 320px; }
+.dots::after { content: ''; animation: dots 1.4s steps(4, end) infinite; }
+@keyframes dots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75%, 100% { content: '...'; } }
+
 /* ───────────── Game layout ───────────── */
 .game { height: 100dvh; max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; }
 .bar { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; padding-top: calc(6px + env(safe-area-inset-top)); }
@@ -216,3 +233,4 @@ button:disabled { cursor: default; }
     .bar { padding-inline: 14px; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+.lobby .muted { color: var(--muted); margin: 0; font-size: 15px; }

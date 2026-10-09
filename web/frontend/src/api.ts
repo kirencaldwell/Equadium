@@ -32,6 +32,29 @@ export interface ActionResult {
     game_over: boolean;
 }
 
+export interface RoomJoin { code: string; seat: string; token: string }
+export type RoomPoll = { changed: false; version: number } | { changed: true; version: number; seat: string; state: GameState };
+
+const authed = (token: string, init: RequestInit = {}): RequestInit => ({
+    ...init,
+    headers: { ...(init.headers as Record<string, string> | undefined), 'X-Player-Token': token },
+});
+
+export const room = {
+    create: (name: string) => call<RoomJoin>('/rooms', json({ name })),
+    join: (code: string, name: string) => call<RoomJoin>(`/rooms/${encodeURIComponent(code)}/join`, json({ name })),
+    state: (code: string, token: string, since?: number) =>
+        call<RoomPoll>(`/rooms/${code}${since === undefined ? '' : `?since=${since}`}`, authed(token)),
+    validate: (code: string, token: string, placed: Placed[], direction: string) =>
+        call<Preview>(`/rooms/${code}/validate_move`, authed(token, json(movePayload(placed, direction)))),
+    play: (code: string, token: string, placed: Placed[], direction: string) =>
+        call<ActionResult>(`/rooms/${code}/play`, authed(token, json(movePayload(placed, direction)))),
+    swap: (code: string, token: string, indices: number[]) =>
+        call<ActionResult>(`/rooms/${code}/swap`, authed(token, json({ tile_indices: indices }))),
+    pass: (code: string, token: string) =>
+        call<ActionResult>(`/rooms/${code}/pass`, authed(token, { method: 'POST' })),
+};
+
 export const api = {
     create: (mode: Mode) => call<{ game_id: string }>('/games/create', json({ mode })),
     state: (id: string) => call<GameState>(`/games/${id}`),

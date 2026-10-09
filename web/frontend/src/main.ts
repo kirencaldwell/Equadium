@@ -1,5 +1,5 @@
 import './style.css';
-import { api } from './api';
+import { api, room } from './api';
 import { equation, tileHtml } from './tiles';
 import type { GameState, Mode, Placed, Preview, Tile } from './types';
 
@@ -8,10 +8,32 @@ import type { GameState, Mode, Placed, Preview, Tile } from './types';
 // ─────────────────────────────────────────────
 type Selection = { kind: 'rack'; index: number } | { kind: 'eq' } | { kind: 'placed'; r: number; c: number } | null;
 
+interface OnlineSeat { code: string; seat: string; token: string }
+
+const SAVE_KEY = 'equadium.online';
+const NAME_KEY = 'equadium.name';
+const POLL_MS = 1500;
+
+function loadSaved(): OnlineSeat | null {
+    try { return JSON.parse(localStorage.getItem(SAVE_KEY) ?? 'null'); } catch { return null; }
+}
+function saveSeat(o: OnlineSeat | null) {
+    try { if (o) localStorage.setItem(SAVE_KEY, JSON.stringify(o)); else localStorage.removeItem(SAVE_KEY); } catch { /* storage unavailable */ }
+}
+function savedName(): string {
+    try { return localStorage.getItem(NAME_KEY) ?? ''; } catch { return ''; }
+}
+function saveName(n: string) {
+    try { localStorage.setItem(NAME_KEY, n); } catch { /* storage unavailable */ }
+}
+const joinLink = (code: string) => `${location.origin}${location.pathname}?room=${code}`;
+
 const FREE_EQUALS: Tile = { symbol: '=', points: 0, expr_multiplier: 1 };
 
 const S = {
-    screen: 'home' as 'home' | 'game',
+    screen: 'home' as 'home' | 'online' | 'game',
+    online: null as null | OnlineSeat,   // set while playing a remote game
+    version: 0,                          // last server version seen (online polling)
     gameId: null as string | null,
     game: null as GameState | null,
     placed: [] as Placed[],
@@ -38,19 +60,23 @@ let toastTimer = 0;
 // Helpers
 // ─────────────────────────────────────────────
 const NAMES: Record<string, string> = { Human: 'You', AI_Opponent: 'Computer', Newton_Bot: 'Newton', Leibniz_Bot: 'Leibniz' };
-const display = (n: string) => NAMES[n] ?? n;
+const display = (n: string) => {
+    if (S.online) return n === S.online.seat ? 'You' : S.game?.labels?.[n] ?? 'Opponent';
+    return NAMES[n] ?? n;
+};
 
 /** The seat a person is sitting in right now (null when only bots are playing). */
 function actingPlayer(): string | null {
     const g = S.game;
     if (!g) return null;
+    if (S.online) return S.online.seat;
     const humans = Object.entries(g.seats).filter(([, k]) => k === 'human').map(([n]) => n);
     if (humans.length === 0) return null;
     if (humans.length === 1) return humans[0];
     return g.current_player;
 }
 
-const myTurn = () => !!S.game && !S.game.game_over && actingPlayer() === S.game.current_player && !S.busy;
+const myTurn = () => !!S.game && !S.game.game_over && (!S.online || !!S.game.joined) && actingPlayer() === S.game.current_player && !S.busy;
 
 function myRack(): Tile[] {
     const g = S.game, me = actingPlayer();
@@ -84,6 +110,8 @@ function resetTurnState() {
 // ─────────────────────────────────────────────
 async function startGame(mode: Mode) {
     stopWatching();
+    stopPolling();
+    S.online = null;
     try {
         const { game_id } = await api.create(mode);
         S.gameId = game_id;
@@ -102,13 +130,24 @@ async function startGame(mode: Mode) {
     if (mode === 'agent_vs_agent') startWatching();
 }
 
+async function fetchState(): Promise<GameState | null> {
+    if (S.online) {
+        const r = await room.state(S.online.code, S.online.token);
+        S.version = r.version;
+        return r.changed ? r.state : null;
+    }
+    return api.state(S.gameId!);
+}
+
 async function refresh() {
     if (!S.gameId) return;
     const before = S.game;
-    S.game = await api.state(S.gameId);
+    const next = await fetchState();
+    if (next) S.game = next;
+    if (!S.game) return;
     markFresh(before, S.game);
     resetTurnState();
-    if (S.game.game_over) S.modal = 'over';
+    if (S.game.game_over) { S.modal = 'over'; if (S.online) { saveSeat(null); stopPolling(); } }
 }
 
 /** Remember which cells changed so the new tiles can animate in. */
@@ -120,8 +159,104 @@ function markFresh(before: GameState | null, after: GameState) {
             if (after.board.grid[r][c] && !before.board.grid[r][c]) S.fresh.add(`${r},${c}`);
 }
 
+// ── Online games ────────────────────────────────────────────
+let pollTimer = 0;
+
+function stopPolling() {
+    window.clearInterval(pollTimer);
+    pollTimer = 0;
+}
+
+function startPolling() {
+    stopPolling();
+    pollTimer = window.setInterval(() => void pollOnce(), POLL_MS);
+}
+
+async function pollOnce() {
+    const o = S.online;
+    if (!o || S.screen !== 'game' || S.busy || document.hidden) return;
+    try {
+        const r = await room.state(o.code, o.token, S.version);
+        if (!S.online || S.busy || !r.changed) return;
+        S.version = r.version;
+        const before = S.game;
+        S.game = r.state;
+        markFresh(before, S.game);
+        const lm = S.game.last_move;
+        const theirs = !!lm && lm.player !== o.seat && JSON.stringify(lm) !== JSON.stringify(before?.last_move);
+        if (before && !before.joined && S.game.joined) showToast(`${display(otherSeat())} joined. Let's play!`);
+        else if (theirs && lm) showToast(describeMove(lm.player, lm.action, lm.tiles?.length ?? 0, lm.score_delta));
+        resetTurnState();
+        if (S.game.game_over) { S.modal = 'over'; saveSeat(null); stopPolling(); }
+        render();
+        if (theirs) centerOnLastMove();
+    } catch (e) {
+        const msg = (e as Error).message;
+        if (/not a player|No game with that code/i.test(msg)) {
+            saveSeat(null); stopPolling(); S.online = null;
+            showToast('That game has ended or expired');
+            goHome();
+        }
+        // other errors (offline, server restarting): keep trying quietly
+    }
+}
+
+const otherSeat = () => (S.online?.seat === 'Player1' ? 'Player2' : 'Player1');
+
+async function enterRoom(seat: OnlineSeat) {
+    stopWatching();
+    stopPolling();
+    S.online = seat;
+    S.gameId = seat.code;
+    try {
+        const r = await room.state(seat.code, seat.token);
+        if (!r.changed) throw new Error('Could not load the game');
+        S.version = r.version;
+        S.game = r.state;
+    } catch (e) {
+        S.online = null;
+        S.gameId = null;
+        saveSeat(null);
+        showToast((e as Error).message);
+        S.screen = 'home';
+        render();
+        return;
+    }
+    saveSeat(seat);
+    history.replaceState(null, '', location.pathname);
+    S.screen = 'game';
+    S.modal = S.game.game_over ? 'over' : null;
+    S.zoom = 1;
+    S.fresh.clear();
+    resetTurnState();
+    render();
+    centerBoard();
+    if (!S.game.game_over) startPolling();
+}
+
+async function createOnline() {
+    const name = readName();
+    try { await enterRoom(await room.create(name)); } catch (e) { showToast((e as Error).message); }
+}
+
+async function joinOnline(code: string) {
+    const name = readName();
+    code = code.trim().toUpperCase();
+    if (!code) { showToast('Enter a game code'); return; }
+    try { await enterRoom(await room.join(code, name)); } catch (e) { showToast((e as Error).message); }
+}
+
+function readName(): string {
+    const el = document.getElementById('name') as HTMLInputElement | null;
+    const name = (el?.value ?? savedName()).trim();
+    saveName(name);
+    return name;
+}
+
 function goHome() {
     stopWatching();
+    stopPolling();
+    S.online = null;
     S.screen = 'home';
     S.modal = null;
     S.gameId = null;
@@ -135,7 +270,7 @@ function goHome() {
 async function submitAction(run: () => Promise<{ status: string; error: string | null; score_delta: number; agent_moves: { player: string; action: string; score_delta: number; tiles: string[] | null }[] }>, okMessage: (r: Awaited<ReturnType<typeof run>>) => string) {
     if (!myTurn()) return;
     const me = actingPlayer()!;
-    const hotSeat = S.game!.mode === 'human_vs_human';
+    const hotSeat = S.game!.mode === 'human_vs_human' && !S.online;
     S.busy = S.game!.mode === 'human_vs_agent' ? 'thinking' : 'submitting';
     render();
     try {
@@ -171,16 +306,21 @@ function describeMove(player: string, action: string, tiles: number, score: numb
 }
 
 const play = () => submitAction(
-    () => api.play(S.gameId!, actingPlayer()!, S.placed, direction()),
+    () => S.online ? room.play(S.online.code, S.online.token, S.placed, direction())
+                   : api.play(S.gameId!, actingPlayer()!, S.placed, direction()),
     r => `+${r.score_delta} points`,
 );
 
 const swap = () => submitAction(
-    () => api.swap(S.gameId!, actingPlayer()!, [...S.swapPick]),
+    () => S.online ? room.swap(S.online.code, S.online.token, [...S.swapPick])
+                   : api.swap(S.gameId!, actingPlayer()!, [...S.swapPick]),
     () => 'Tiles swapped',
 );
 
-const pass = () => submitAction(() => api.pass(S.gameId!, actingPlayer()!), () => 'Turn passed');
+const pass = () => submitAction(
+    () => S.online ? room.pass(S.online.code, S.online.token) : api.pass(S.gameId!, actingPlayer()!),
+    () => 'Turn passed',
+);
 
 // ─────────────────────────────────────────────
 // Placing tiles
@@ -230,7 +370,8 @@ function schedulePreview() {
     const token = ++previewToken;
     previewTimer = window.setTimeout(async () => {
         try {
-            const p = await api.validate(S.gameId!, S.placed, direction());
+            const p = S.online ? await room.validate(S.online.code, S.online.token, S.placed, direction())
+                               : await api.validate(S.gameId!, S.placed, direction());
             if (token !== previewToken) return;   // a newer edit superseded this one
             S.preview = p;
             updateDock();
@@ -273,7 +414,7 @@ function render() {
     document.documentElement.style.setProperty('--cell-size', `${Math.round(base * S.zoom)}px`);
     const scroller = document.querySelector('.board-scroll') as HTMLElement | null;
     const pos = scroller ? { x: scroller.scrollLeft, y: scroller.scrollTop } : null;
-    app.innerHTML = S.screen === 'home' ? homeHtml() : gameHtml();
+    app.innerHTML = S.screen === 'home' ? homeHtml() : S.screen === 'online' ? onlineHtml() : gameHtml();
     app.insertAdjacentHTML('beforeend', modalHtml());
     lastModal = S.modal;
     app.insertAdjacentHTML('beforeend', `<div id="toast" class="toast ${S.toast ? 'show' : ''}">${S.toast}</div>`);
@@ -282,6 +423,7 @@ function render() {
 }
 
 function homeHtml(): string {
+    const resume = loadSaved();
     const card = (mode: Mode | '', icon: string, title: string, blurb: string, disabled = false) => `
         <button class="mode-card" ${disabled ? 'disabled' : `data-act="start" data-mode="${mode}"`}>
             <span class="mode-icon">${icon}</span>
@@ -299,10 +441,60 @@ function homeHtml(): string {
             ${card('human_vs_agent', '🧮', 'Play the Computer', 'Solo. Out-build the bot.')}
             ${card('human_vs_human', '🤝', 'Pass &amp; Play', 'Two players, one screen.')}
             ${card('agent_vs_agent', '🤖', 'Watch the Bots', 'Two bots battle it out.')}
-            ${card('', '🌐', 'Online', 'Play friends anywhere.', true)}
+            <button class="mode-card" data-act="online">
+                <span class="mode-icon">🌐</span>
+                <span class="mode-text"><strong>Play a Friend Online</strong><small>Share a code, play from anywhere.</small></span>
+                <span class="chev">›</span>
+            </button>
+            ${resume ? `<button class="mode-card resume" data-act="online-resume">
+                <span class="mode-icon">▶</span>
+                <span class="mode-text"><strong>Resume your game</strong><small>Code ${resume.code}</small></span>
+                <span class="chev">›</span>
+            </button>` : ''}
         </div>
         <button class="link" data-act="help">How to play</button>
     </main>`;
+}
+
+function onlineHtml(): string {
+    const incoming = new URLSearchParams(location.search).get('room')?.toUpperCase() ?? '';
+    return `
+    <main class="home online">
+        <h2 class="online-title">Play a friend online</h2>
+        <label class="field"><span>Your name</span>
+            <input id="name" maxlength="16" autocomplete="nickname" placeholder="Player" value="${savedName().replace(/"/g, '&quot;')}"></label>
+        <div class="modes">
+            <button class="mode-card" data-act="online-create">
+                <span class="mode-icon">✨</span>
+                <span class="mode-text"><strong>Start a new game</strong><small>Get a code to send to a friend.</small></span>
+                <span class="chev">›</span>
+            </button>
+        </div>
+        <div class="join-row">
+            <input id="code" maxlength="5" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="CODE" value="${incoming}">
+            <button class="primary" data-act="online-join">Join</button>
+        </div>
+        <button class="link" data-act="home">‹ Back</button>
+    </main>`;
+}
+
+function lobbyHtml(g: GameState): string {
+    const code = S.online!.code;
+    return `
+    <div class="game">
+        <header class="bar">
+            <button class="icon" data-act="home" aria-label="Menu">‹</button>
+            <span class="wordmark small">Equadium</span>
+            <button class="icon" data-act="help" aria-label="How to play">?</button>
+        </header>
+        <main class="lobby">
+            <p class="muted">Send this code or link to your friend:</p>
+            <div class="code">${code}</div>
+            <button class="primary" data-act="copy-link">Copy invite link</button>
+            <p class="waiting">Waiting for ${display(otherSeat())} to join<span class="dots"></span></p>
+            <p class="muted small">${g.labels?.[S.online!.seat] ? `You're playing as ${g.labels[S.online!.seat]}. ` : ''}Your game is saved on this device, so you can leave and come back.</p>
+        </main>
+    </div>`;
 }
 
 function scoreboardHtml(g: GameState): string {
@@ -320,7 +512,9 @@ function statusText(g: GameState): string {
     if (S.busy === 'thinking') return 'Computer is thinking…';
     if (g.game_over) return 'Game over';
     const lm = g.last_move;
-    const base = g.mode === 'agent_vs_agent'
+    const base = S.online
+        ? (g.current_player === S.online.seat ? 'Your turn' : `Waiting for ${display(g.current_player)}…`)
+        : g.mode === 'agent_vs_agent'
         ? `${display(g.current_player)} to move`
         : g.current_player === actingPlayer() ? (g.mode === 'human_vs_human' ? `${display(g.current_player)}'s turn` : 'Your turn') : '';
     if (lm && lm.ok && S.placed.length === 0) {
@@ -432,6 +626,7 @@ function updateDock() {
 
 function gameHtml(): string {
     const g = S.game!;
+    if (S.online && !g.joined) return lobbyHtml(g);
     return `
     <div class="game ${S.shake ? 'shake' : ''} ${S.busy ? 'busy' : ''}">
         <header class="bar">
@@ -487,12 +682,12 @@ function modalHtml(): string {
         case 'over': {
             if (!g) break;
             const tie = g.winners.length > 1;
-            const me = g.mode === 'human_vs_agent' ? 'Human' : null;
-            const headline = tie ? "It's a tie" : me ? (g.winners[0] === me ? 'You win!' : 'Computer wins') : `${display(g.winners[0])} wins`;
+            const me = S.online ? S.online.seat : g.mode === 'human_vs_agent' ? 'Human' : null;
+            const headline = tie ? "It's a tie" : me ? (g.winners[0] === me ? 'You win!' : `${S.online ? display(g.winners[0]) : 'Computer'} wins`) : `${display(g.winners[0])} wins`;
             const why: Record<string, string> = { 'rack empty': 'Someone used every tile.', stalled: 'Nobody could play.', 'bag empty+stuck': 'The bag ran out and nobody could play.', 'turn limit': 'Turn limit reached.' };
             body = `<h2>${headline}</h2><p class="muted">${why[g.end_reason ?? ''] ?? ''}</p>
             <div class="final">${[...g.players].sort((a, b) => b.score - a.score).map(p => `<div class="${g.winners.includes(p.name) ? 'win' : ''}"><span>${display(p.name)}</span><strong>${p.score}</strong></div>`).join('')}</div>
-            <div class="modal-actions"><button class="ghost wide" data-act="home">Menu</button><button class="primary" data-act="start" data-mode="${g.mode}">Play again</button></div>`;
+            <div class="modal-actions"><button class="ghost wide" data-act="home">Menu</button>${S.online ? '<button class="primary" data-act="online">New online game</button>' : `<button class="primary" data-act="start" data-mode="${g.mode}">Play again</button>`}</div>`;
             break;
         }
         default:
@@ -556,6 +751,14 @@ app.addEventListener('click', (e) => {
         if (act === 'close-scrim' && target.closest('.modal')) return;
         switch (act) {
             case 'start': void startGame((actEl.dataset.mode as Mode)); break;
+            case 'online': stopPolling(); S.online = null; S.modal = null; S.screen = 'online'; render(); break;
+            case 'online-create': void createOnline(); break;
+            case 'online-join': void joinOnline((document.getElementById('code') as HTMLInputElement).value); break;
+            case 'online-resume': { const saved = loadSaved(); if (saved) void enterRoom(saved); break; }
+            case 'copy-link':
+                void navigator.clipboard?.writeText(joinLink(S.online!.code))
+                    .then(() => showToast('Invite link copied'), () => showToast(`Share this code: ${S.online!.code}`));
+                break;
             case 'help': S.modal = 'help'; render(); break;
             case 'close': case 'close-scrim': S.modal = S.game?.game_over ? 'over' : null; render(); break;
             case 'home': goHome(); break;
@@ -637,3 +840,13 @@ document.addEventListener('keydown', (e) => {
 });
 
 render();
+
+// Opened via an invite link (?room=CODE): resume if we already sit in that game, otherwise offer to join.
+{
+    const code = new URLSearchParams(location.search).get('room')?.toUpperCase();
+    if (code) {
+        const saved = loadSaved();
+        if (saved && saved.code === code) void enterRoom(saved);
+        else { S.screen = 'online'; render(); }
+    }
+}

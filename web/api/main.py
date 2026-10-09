@@ -14,7 +14,8 @@ from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
-from web.api.models import PlayerModel, BoardModel, MoveModel, TileModel, CreateGameModel, SwapModel
+from web.api.models import MoveModel, CreateGameModel, SwapModel
+from web.api.serialize import game_to_model, tile_to_model, _tiles_from_model
 from core.game_config import CONFIG
 from core.game_entities import Tile
 from core.session import GameSession, MODES, HUMAN
@@ -68,6 +69,8 @@ app = FastAPI()
 
 # The frontend (e.g. on Vercel) calls this API from another origin.
 # ALLOWED_ORIGINS is a comma-separated list, e.g. "https://equadium.vercel.app".
+from web.api import rooms  # noqa: E402  (after app setup is fine; no circular import)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",")],
@@ -75,11 +78,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(rooms.router)
+
 sessions = {}  # game_id -> GameSession (simple in-memory storage)
 
 # Middleware for structured request logging
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    if request.method == "GET" and request.url.path.startswith("/rooms"):
+        return await call_next(request)   # clients poll these every second or two
     body = await request.body()
     log_entry = {
         "timestamp": datetime.now().isoformat(),
@@ -117,58 +124,10 @@ def log_game_state(game_id, game, action_type, extra=None):
     }
     logger.info(json.dumps(log_entry))
 
-def tile_to_model(tile):
-    if tile is None:
-        return None
-    return TileModel(
-        symbol=tile.symbol,
-        points=tile.points,
-        expr_multiplier=tile.expr_multiplier
-    )
-
-def game_to_model(session):
-    game = session.game
-    return {
-        "board": BoardModel(
-            width=game.board.width,
-            height=game.board.height,
-            grid=[
-                [tile_to_model(tile) for tile in row]
-                for row in game.board.grid
-            ]
-        ),
-        "players": [
-            PlayerModel(
-                name=p.name,
-                score=p.score,
-                rack=[tile_to_model(t) for t in p.rack],
-                equals_available=p.equals_available
-            )
-            for p in game.players
-        ],
-        "current_player": session.current_player.name,
-        "equals_pile_count": len(game.equals_bag),
-        "mode": session.mode,
-        "seats": {name: seat.kind for name, seat in session.seats.items()},
-        "game_over": game.is_game_over,
-        "end_reason": game.end_reason,
-        "winners": game.winners if game.is_game_over else [],
-        "turns_played": game.turns_played,
-        "bag_count": len(game.tile_bag),
-        "last_move": session.history[-1].__dict__ if session.history else None,
-    }
-
 def _get_session(game_id: str) -> GameSession:
     if game_id not in sessions:
         raise HTTPException(status_code=404, detail="Game not found")
     return sessions[game_id]
-
-def _tiles_from_model(move: MoveModel):
-    return [
-        (p['r'], p['c'], Tile(symbol=p['tile']['symbol'], points=p['tile']['points'],
-                              expr_multiplier=p['tile']['expr_multiplier']))
-        for p in move.tiles_to_play
-    ]
 
 # ── Turn ownership helpers ──────────────────────────────────────────────────
 def _is_multiplayer(session) -> bool:

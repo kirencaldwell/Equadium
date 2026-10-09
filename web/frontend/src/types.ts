@@ -8,6 +8,8 @@ export interface Player {
     name: string;
     score: number;
     rack: Tile[];
+    /** online games hide the opponent's rack and send only its size */
+    rack_count?: number;
     equals_available: boolean;
 }
 
@@ -36,6 +38,9 @@ export interface GameState {
     turns_played: number;
     bag_count: number;
     last_move: LastMove | null;
+    /** online games only */
+    labels?: Record<string, string>;
+    joined?: boolean;
 }
 
 export interface Placed {
