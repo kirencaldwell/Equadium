@@ -1,6 +1,6 @@
 /**
  * End-to-end check that you can try tiles while it is the opponent's turn (but not submit them), and
- * that they survive the opponent's move. Same setup as e2e/navigation.mjs.
+ * that they are cleared when the opponent moves. Same setup as e2e/navigation.mjs.
  *   node e2e/waiting.mjs
  */
 import { chromium } from 'playwright-core';
@@ -45,8 +45,7 @@ check('5 Recall works', !(await waiter.evaluate(() => document.querySelector('[d
 // the mover plays something so the board changes under the waiting player: a lone '=' is not legal, so pass
 await mover.click('[data-act=pass]'); await mover.waitForSelector('.modal.pass'); await mover.click('[data-act=pass-confirm]');
 await waiter.waitForFunction(() => /Your turn/.test(document.querySelector('#status')?.textContent ?? ''), null, { timeout: 8000 });
-check('6 pending tiles survive the opponent moving', !!(await waiter.$('.tile.pending')));
-await waiter.click('[data-act=recall]'); await waiter.waitForTimeout(300);
-check('7 Recall clears them', !(await waiter.$('.tile.pending')));
+check('6 pending tiles are cleared when the opponent moves', !(await waiter.$('.tile.pending')));
+check('7 the tile is back in the rack', !(await waiter.$('.rack .slot.used')));
 check('8 no page errors', errs.length === 0, errs.join('; '));
 console.log(`${pass} passed, ${fail} failed`); await b.close(); process.exit(fail ? 1 : 0);

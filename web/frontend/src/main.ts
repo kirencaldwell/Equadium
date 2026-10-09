@@ -385,19 +385,6 @@ function markFresh(before: GameState | null, after: GameState) {
             if (after.board.grid[r][c] && !before.board.grid[r][c]) S.fresh.add(`${r},${c}`);
 }
 
-/** The opponent moved: keep the tiles you were trying out (dropping any that landed on a square they just
- *  filled) and re-check them against the new board. */
-function keepPendingTiles() {
-    const g = S.game;
-    if (!g || g.game_over || !S.placed.length) { resetTurnState(); return; }
-    S.placed = S.placed.filter(p => !g.board.grid[p.r][p.c]);
-    S.selected = null;
-    S.preview = null;
-    S.swapPick.clear();
-    previewToken++;
-    if (S.placed.length) schedulePreview();
-}
-
 // ── Online games ────────────────────────────────────────────
 let pollTimer = 0;
 
@@ -425,7 +412,7 @@ async function pollOnce() {
         const theirs = !!lm && lm.player !== o.seat && JSON.stringify(lm) !== JSON.stringify(before?.last_move);
         if (before && !before.joined && S.game.joined) showToast(`${display(otherSeat())} joined. Let's play!`);
         else if (theirs && lm) showToast(describeMove(lm.player, lm.action, lm.tiles?.length ?? 0, lm.score_delta));
-        keepPendingTiles();
+        resetTurnState();   // the board changed under any tiles you were trying, so start the turn fresh
         if (S.game.game_over) { S.modal = 'over'; saveSeat(null); stopPolling(); }
         render();
         if (theirs) centerOnLastMove();
