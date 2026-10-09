@@ -2,7 +2,8 @@
 Persistence for saved games, player stats and profiles.
 
 `get_store()` picks the backend from the environment:
-  SUPABASE_URL + SUPABASE_SERVICE_KEY  -> SupabaseStore (Postgres via PostgREST)
+  FIREBASE_PROJECT_ID + credentials    -> FirestoreStore (credentials = FIREBASE_SERVICE_ACCOUNT json,
+                                          GOOGLE_APPLICATION_CREDENTIALS file, or FIRESTORE_EMULATOR_HOST)
   otherwise                            -> MemoryStore (lost on restart; fine for local dev)
 
 Game records are plain dicts:
@@ -10,13 +11,12 @@ Game records are plain dicts:
   state (GameSession.to_dict()), summary, meta, user_ids, created_at, updated_at
 """
 import copy
+import json
 import logging
 import os
 import threading
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
-
-import requests
 
 logger = logging.getLogger("equadium_store")
 
@@ -95,67 +95,97 @@ class MemoryStore(Store):
             return copy.deepcopy(self._profiles.get(user_id))
 
 
-class SupabaseStore(Store):
-    """Talks to Supabase's PostgREST API with the service-role key (server-side only)."""
+class FirestoreStore(Store):
+    """Google Cloud Firestore, accessed server-side with a service account (which bypasses security rules).
+
+    Collections: games/{id}, game_results/{game_id}__{user_id}, profiles/{user_id}.
+    Two Firestore quirks shape the layout:
+      * arrays can't contain arrays, and the game snapshot does, so it is stored as a JSON string;
+      * listing "my unfinished games" must not need a composite index, so each game carries
+        `active_user_ids` (= user_ids while unfinished, empty afterwards) and is queried with a
+        single array-contains filter.
+    """
     enabled = True
-    name = "supabase"
+    name = "firestore"
 
-    def __init__(self, url: str, service_key: str, timeout: float = 8.0):
-        self.base = url.rstrip("/") + "/rest/v1"
+    def __init__(self, project_id: Optional[str] = None, credentials_json: Optional[str] = None,
+                 client=None, timeout: float = 8.0):
+        if client is None:
+            from google.cloud import firestore
+            creds = None
+            if credentials_json:
+                from google.oauth2 import service_account
+                creds = service_account.Credentials.from_service_account_info(json.loads(credentials_json))
+            client = firestore.Client(project=project_id, credentials=creds)
+        self.db = client
         self.timeout = timeout
-        self.http = requests.Session()
-        self.http.headers.update({"apikey": service_key, "Content-Type": "application/json"})
-        # Legacy service_role keys are JWTs and go in Authorization too; the newer
-        # sb_secret_... keys must only be sent as the apikey header.
-        if service_key.startswith("eyJ"):
-            self.http.headers["Authorization"] = f"Bearer {service_key}"
 
-    def _request(self, method: str, table: str, params=None, json=None, prefer: Optional[str] = None):
-        headers = {"Prefer": prefer} if prefer else {}
-        try:
-            res = self.http.request(method, f"{self.base}/{table}", params=params, json=json,
-                                    headers=headers, timeout=self.timeout)
-        except requests.RequestException as exc:
-            raise StoreError(f"Supabase request failed: {exc}") from exc
-        if res.status_code >= 300:
-            raise StoreError(f"Supabase {method} {table} -> {res.status_code}: {res.text[:300]}")
-        return res.json() if method == "GET" else None
+    # -- encoding -----------------------------------------------------------
+    @staticmethod
+    def _encode(rec: dict) -> dict:
+        data = {k: v for k, v in rec.items() if k != "state"}
+        data["state_json"] = json.dumps(rec["state"], separators=(",", ":"))
+        data["active_user_ids"] = list(rec["user_ids"]) if rec["status"] in ACTIVE else []
+        return data
 
-    def _upsert(self, table: str, rows, conflict: str):
-        self._request("POST", table, params={"on_conflict": conflict}, json=rows,
-                      prefer="resolution=merge-duplicates,return=minimal")
+    @staticmethod
+    def _decode(data: dict) -> dict:
+        rec = {k: v for k, v in data.items() if k not in ("state_json", "active_user_ids")}
+        if "state_json" in data:
+            rec["state"] = json.loads(data["state_json"])
+        return rec
 
+    @staticmethod
+    def _where(collection, field: str, op: str, value):
+        from google.cloud.firestore_v1.base_query import FieldFilter
+        return collection.where(filter=FieldFilter(field, op, value))
+
+    # -- games --------------------------------------------------------------
     def save_game(self, rec):
-        row = {**rec, "updated_at": now_iso()}
-        self._upsert("games", row, "id")
+        from google.api_core.exceptions import NotFound
+        ref = self.db.collection("games").document(rec["id"])
+        data = {**self._encode(rec), "updated_at": now_iso()}
+        try:
+            ref.update(data, timeout=self.timeout)          # replaces the listed fields
+        except NotFound:
+            ref.set({**data, "created_at": data["updated_at"]}, timeout=self.timeout)
 
     def get_game(self, game_id=None, code=None):
-        key, value = ("id", game_id) if game_id is not None else ("code", code)
-        rows = self._request("GET", "games", params={key: f"eq.{value}", "select": "*", "limit": 1})
-        return rows[0] if rows else None
+        games = self.db.collection("games")
+        if game_id is not None:
+            snap = games.document(game_id).get(timeout=self.timeout)
+            return self._decode(snap.to_dict()) if snap.exists else None
+        for snap in self._where(games, "code", "==", code).limit(1).stream(timeout=self.timeout):
+            return self._decode(snap.to_dict())
+        return None
 
     def list_user_games(self, user_id, statuses=ACTIVE, limit=20):
-        return self._request("GET", "games", params={
-            "user_ids": "cs.{" + user_id + "}",
-            "status": "in.(" + ",".join(statuses) + ")",
-            "order": "updated_at.desc", "limit": limit,
-            "select": "id,kind,code,mode,status,summary,user_ids,meta,updated_at",
-        })
+        query = self._where(self.db.collection("games"), "active_user_ids", "array_contains", user_id)
+        # `select` leaves out the (large) snapshot; the Continue list only needs the summary card.
+        query = query.select(["id", "kind", "code", "mode", "status", "summary", "user_ids", "meta", "updated_at"])
+        recs = [self._decode(s.to_dict()) for s in query.stream(timeout=self.timeout)]
+        recs = [r for r in recs if r["status"] in statuses]
+        recs.sort(key=lambda r: r["updated_at"], reverse=True)
+        return recs[:limit]
 
+    # -- results & profiles -------------------------------------------------
     def save_results(self, rows):
-        if rows:
-            self._upsert("game_results", rows, "game_id,user_id")
+        for r in rows:
+            self.db.collection("game_results").document(f"{r['game_id']}__{r['user_id']}").set(r, timeout=self.timeout)
 
     def list_results(self, user_id, limit=1000):
-        return self._request("GET", "game_results", params={
-            "user_id": f"eq.{user_id}", "order": "finished_at.desc", "limit": limit, "select": "*"})
+        query = self._where(self.db.collection("game_results"), "user_id", "==", user_id)
+        rows = [s.to_dict() for s in query.limit(limit).stream(timeout=self.timeout)]
+        rows.sort(key=lambda r: r["finished_at"], reverse=True)
+        return rows
 
     def upsert_profile(self, user_id, display_name, avatar_url):
-        self._upsert("profiles", {"user_id": user_id, "display_name": display_name, "avatar_url": avatar_url}, "user_id")
+        self.db.collection("profiles").document(user_id).set(
+            {"user_id": user_id, "display_name": display_name, "avatar_url": avatar_url}, merge=True, timeout=self.timeout)
 
     def get_profile(self, user_id):
-        rows = self._request("GET", "profiles", params={"user_id": f"eq.{user_id}", "select": "*", "limit": 1})
-        return rows[0] if rows else None
+        snap = self.db.collection("profiles").document(user_id).get(timeout=self.timeout)
+        return snap.to_dict() if snap.exists else None
 
 
 _store: Optional[Store] = None
@@ -164,13 +194,14 @@ _store: Optional[Store] = None
 def get_store() -> Store:
     global _store
     if _store is None:
-        url, key = os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_KEY")
-        if url and key:
-            _store = SupabaseStore(url, key)
-            logger.info("Saving games to Supabase")
+        pid = os.getenv("FIREBASE_PROJECT_ID")
+        creds = os.getenv("FIREBASE_SERVICE_ACCOUNT")
+        if pid and (creds or os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("FIRESTORE_EMULATOR_HOST")):
+            _store = FirestoreStore(pid, creds)
+            logger.info("Saving games to Firestore (project %s)", pid)
         else:
             _store = MemoryStore()
-            logger.info("Supabase not configured; saved games live in memory only")
+            logger.info("Firestore not configured; saved games live in memory only")
     return _store
 
 

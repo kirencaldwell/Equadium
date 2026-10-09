@@ -34,32 +34,44 @@ Playing is open to guests. Signing in with Google adds:
 - **Stats**: every finished game against the computer or a friend (not Pass & Play, not bot-watching) is
   recorded: record, win rate, average and best score, best single play, streak, recent games.
 
-### Setting up Supabase
-1. Create a project at supabase.com.
-2. **SQL editor**: run `supabase/migrations/20261009000000_init.sql`. It creates `games`, `game_results` and
-   `profiles` with row level security on (the `games` table has no public policies; it holds room secrets).
-3. **Google login**: Google Cloud Console -> create an OAuth client (type *Web application*) with the redirect URI
-   `https://<project-ref>.supabase.co/auth/v1/callback`; then Supabase -> Authentication -> Providers -> Google:
-   paste the client ID and secret.
-4. **Redirect URLs**: Supabase -> Authentication -> URL Configuration: set *Site URL* to your deployed URL and add
-   `http://localhost:3000` and the deployed URL under *Redirect URLs*.
-5. **API env** (see `.env.example`): `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` (secret, server only) and, if your project
-   still signs tokens with HS256, `SUPABASE_JWT_SECRET`.
-6. **Frontend env** (see `web/frontend/.env.example`): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
+It uses Firebase: **Authentication** for Google sign-in and **Firestore** for the data. Both are on the free
+Spark plan (no credit card).
 
-The API checks every request's token (HS256 shared secret or the project's public JWKS, whichever the token uses),
-so players can only open their own games. A storage outage never blocks a move: the game carries on in memory and
+### Setting up Firebase
+1. Create a project at console.firebase.google.com.
+2. **Authentication** -> Get started -> Sign-in method -> **Google** -> Enable.
+3. **Authentication** -> Settings -> **Authorized domains**: add your deployed domain (`localhost` is already there).
+   Forgetting this is the most common cause of "this site isn't allowed to sign in".
+4. **Firestore Database** -> Create database (production mode, pick a region), then paste `firestore.rules` into
+   the Rules tab. The rules deny all direct access; only the API (service account) touches the data.
+5. **Project settings** -> General -> Your apps -> add a **Web app** and copy its config into
+   `web/frontend/.env` (`VITE_FIREBASE_*`, see `web/frontend/.env.example`).
+6. **Project settings** -> Service accounts -> **Generate new private key**. Set the downloaded JSON, as one line,
+   as `FIREBASE_SERVICE_ACCOUNT` on the API host, along with `FIREBASE_PROJECT_ID` (see `.env.example`).
+
+The API verifies each request's ID token against Google's published signing certificates (no shared secret), so
+players can only open their own games. A storage outage never blocks a move: the game carries on in memory and
 saves again on the next move.
+
+Without any of this the app still works as guest-only.
+
+### Developing against the Firestore emulator
+```
+npx firebase-tools emulators:start --only firestore          # needs Java; listens on 127.0.0.1:8080
+FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FIREBASE_PROJECT_ID=demo python -m uvicorn web.api.main:app --port 8000
+FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 pytest web/api/test_accounts.py   # also runs the store tests on real Firestore
+```
+Without `FIRESTORE_EMULATOR_HOST` the emulator tests are skipped and the store is tested against an in-process fake.
 
 ## Deploying
 
 - **Frontend (Vercel):** import the repo, set *Root Directory* to `web/frontend` (build `npm run build`, output `dist`),
-  and add `VITE_API_URL` (your API's URL) plus the two `VITE_SUPABASE_*` variables. Vite bakes them in at build time,
-  so redeploy after changing them.
+  and add `VITE_API_URL` (your API's URL) plus the four `VITE_FIREBASE_*` variables. Vite bakes them in at build
+  time, so redeploy after changing them. Add the Vercel domain to Firebase's Authorized domains.
 - **API:** needs a long-running Python host (Render, Railway, Fly, ...), not Vercel serverless: games are cached in
   memory. Start command: `uvicorn web.api.main:app --host 0.0.0.0 --port $PORT`; install with
-  `pip install -r requirements.txt`. Set `ALLOWED_ORIGINS` to your Vercel URL and the Supabase variables above.
-  Run a single instance: the in-memory cache and per-game locks are per-process.
+  `pip install -r requirements.txt`. Set `ALLOWED_ORIGINS` to your Vercel URL plus `FIREBASE_PROJECT_ID` and
+  `FIREBASE_SERVICE_ACCOUNT`. Run a single instance: the in-memory cache and per-game locks are per-process.
 
 ## Stress testing
 

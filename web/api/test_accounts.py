@@ -1,29 +1,54 @@
-"""Sign-in, saved games and stats. Uses an in-memory store and locally minted Supabase-style JWTs."""
+"""Sign-in, saved games and stats. Uses an in-memory store and locally minted Firebase-style ID tokens."""
+import datetime
 import time
 
 import jwt
 import pytest
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 from fastapi.testclient import TestClient
 
 from core.game_config import CONFIG
 from core.game_entities import make_tile
 from web.api import auth, main, persistence, rooms
-from web.api.store import MemoryStore, SupabaseStore, set_store
+from web.api.store import FirestoreStore, MemoryStore, set_store
 
-SECRET = "test-secret-test-secret-test-secret-123"
-URL = "https://proj.supabase.co"
-ALICE, BOB = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+PID = "equadium-test"
+CERTS_URL = "https://certs.test/securetoken"
+ALICE, BOB = "alice-uid-0001", "bob-uid-0002"
 
 client = TestClient(main.app)
 
 
-def token(uid=ALICE, name="Alice", secret=SECRET, alg="HS256", exp=3600, aud="authenticated", iss=None, key=None):
-    claims = {"sub": uid, "aud": aud, "exp": int(time.time()) + exp, "email": f"{name.lower()}@x.com",
-              "user_metadata": {"full_name": name, "avatar_url": "http://a/v.png"}}
-    if iss:
-        claims["iss"] = iss
-    return jwt.encode(claims, key or secret, algorithm=alg)
+def make_key(kid):
+    """An RSA key plus a self-signed X.509 cert, like the ones Google publishes for Firebase."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+            .serial_number(x509.random_serial_number()).not_valid_before(now - datetime.timedelta(days=1))
+            .not_valid_after(now + datetime.timedelta(days=30)).sign(key, hashes.SHA256()))
+    return kid, key, cert.public_bytes(serialization.Encoding.PEM).decode()
+
+
+KID, KEY, CERT_PEM = make_key("key-1")
+
+
+class FakeCertsResponse:
+    def __init__(self, certs, max_age=3600):
+        self._certs, self.headers = certs, {"Cache-Control": f"public, max-age={max_age}, must-revalidate"}
+
+    def raise_for_status(self): pass
+    def json(self): return self._certs
+
+
+def token(uid=ALICE, name="Alice", exp=3600, aud=PID, iss=None, key=KEY, kid=KID, alg="RS256", sub=None):
+    now = int(time.time())
+    claims = {"sub": uid if sub is None else sub, "aud": aud, "iss": iss or f"https://securetoken.google.com/{PID}",
+              "iat": now - 5, "exp": now + exp, "email": f"{name.lower()}@x.com", "name": name, "picture": "http://a/v.png"}
+    return jwt.encode(claims, key, algorithm=alg, headers={"kid": kid})
 
 
 def H(uid=ALICE, name="Alice", **kw):
@@ -32,14 +57,25 @@ def H(uid=ALICE, name="Alice", **kw):
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
-    monkeypatch.setenv("SUPABASE_JWT_SECRET", SECRET)
-    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.setenv("FIREBASE_PROJECT_ID", PID)
+    monkeypatch.setenv("FIREBASE_CERTS_URL", CERTS_URL)
+    fetches = []
+    published = {KID: CERT_PEM}
+
+    def fake_get(url, timeout=None):
+        assert url == CERTS_URL
+        fetches.append(url)
+        return FakeCertsResponse(dict(published))
+    monkeypatch.setattr(auth.requests, "get", fake_get)
+    auth.reset_cert_cache()
     store = MemoryStore()
     set_store(store)
     main.sessions.clear()
     rooms._rooms.clear()
+    store.cert_fetches, store.published = fetches, published
     yield store
     set_store(None)
+    auth.reset_cert_cache()
 
 
 def restart():
@@ -71,9 +107,41 @@ def test_valid_token_identifies_user():
     assert r.json()["id"] == ALICE and r.json()["name"] == "Alice" and r.json()["avatar_url"] == "http://a/v.png"
 
 
-@pytest.mark.parametrize("kw", [{"secret": "x" * 40}, {"exp": -10}, {"aud": "anon"}])
+OTHER_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
+@pytest.mark.parametrize("kw", [
+    {"exp": -10},                                                     # expired
+    {"aud": "another-project"},                                       # token for a different Firebase project
+    {"iss": "https://securetoken.google.com/another-project"},
+    {"key": OTHER_KEY},                                               # signed by someone else
+    {"kid": "no-such-key"},                                           # unknown signing key
+    {"sub": ""},                                                      # no subject
+])
 def test_bad_tokens_rejected(kw):
     assert client.get("/me", headers=H(**kw)).status_code == 401
+
+
+def test_forged_hs256_token_using_public_cert_as_secret_is_rejected():
+    """The classic algorithm-confusion attack: sign with HMAC using the (public) certificate as the secret.
+    Built by hand because PyJWT itself refuses to do this."""
+    import base64, hashlib, hmac, json as _json
+    b64 = lambda raw: base64.urlsafe_b64encode(raw).rstrip(b"=")
+    header = b64(_json.dumps({"alg": "HS256", "typ": "JWT", "kid": KID}).encode())
+    body = b64(_json.dumps({"sub": ALICE, "aud": PID, "iss": f"https://securetoken.google.com/{PID}",
+                            "iat": int(time.time()), "exp": int(time.time()) + 600}).encode())
+    sig = b64(hmac.new(CERT_PEM.encode(), header + b"." + body, hashlib.sha256).digest())
+    forged = (header + b"." + body + b"." + sig).decode()
+    assert client.get("/me", headers={"Authorization": f"Bearer {forged}"}).status_code == 401
+
+
+def test_unsigned_token_is_rejected():
+    unsigned = jwt.encode({"sub": ALICE, "aud": PID, "exp": int(time.time()) + 600}, None, algorithm="none")
+    assert client.get("/me", headers={"Authorization": f"Bearer {unsigned}"}).status_code == 401
+
+
+def test_garbage_token_is_rejected():
+    assert client.get("/me", headers={"Authorization": "Bearer not-a-jwt"}).status_code == 401
 
 
 def test_bad_token_is_not_silently_a_guest():
@@ -81,28 +149,36 @@ def test_bad_token_is_not_silently_a_guest():
     assert client.post("/games/create", json={"mode": "human_vs_agent"}, headers=H(exp=-10)).status_code == 401
 
 
-def test_asymmetric_tokens_verified_via_jwks(monkeypatch):
-    private = ec.generate_private_key(ec.SECP256R1())
-    monkeypatch.setenv("SUPABASE_URL", URL)
-    monkeypatch.delenv("SUPABASE_JWT_SECRET")
+def test_certs_are_cached_and_rotated_keys_are_picked_up(env):
+    for _ in range(3):
+        assert client.get("/me", headers=H()).status_code == 200
+    assert len(env.cert_fetches) == 1                       # not one fetch per request
 
-    class FakeJwks:
-        def get_signing_key_from_jwt(self, _):
-            return type("K", (), {"key": private.public_key()})()
-    monkeypatch.setitem(auth._jwks_clients, URL, FakeJwks())
+    new_kid, new_key, new_pem = make_key("key-2")           # Google rotates keys
+    env.published[new_kid] = new_pem
+    auth._certs._fetched -= auth.CERT_REFRESH_MIN_SECONDS   # let the unknown-kid refresh through
+    assert client.get("/me", headers=H(key=new_key, kid=new_kid)).status_code == 200
+    assert len(env.cert_fetches) == 2
 
-    good = token(alg="ES256", key=private, iss=f"{URL}/auth/v1")
-    assert client.get("/me", headers={"Authorization": f"Bearer {good}"}).json()["id"] == ALICE
-    other = ec.generate_private_key(ec.SECP256R1())
-    forged = token(alg="ES256", key=other, iss=f"{URL}/auth/v1")
-    assert client.get("/me", headers={"Authorization": f"Bearer {forged}"}).status_code == 401
-    wrong_iss = token(alg="ES256", key=private, iss="https://evil.example/auth/v1")
-    assert client.get("/me", headers={"Authorization": f"Bearer {wrong_iss}"}).status_code == 401
+
+def test_unknown_key_ids_cannot_force_a_fetch_per_request(env):
+    client.get("/me", headers=H())
+    before = len(env.cert_fetches)
+    for _ in range(5):
+        assert client.get("/me", headers=H(kid="nope")).status_code == 401
+    assert len(env.cert_fetches) == before                   # rate limited
+
+
+def test_keys_survive_a_certificate_endpoint_outage(monkeypatch):
+    assert client.get("/me", headers=H()).status_code == 200
+    auth._certs._expires = 0                                  # force a refresh...
+    monkeypatch.setattr(auth.requests, "get", lambda *a, **k: (_ for _ in ()).throw(auth.requests.ConnectionError("down")))
+    assert client.get("/me", headers=H()).status_code == 200  # ...which fails; last good keys still work
 
 
 def test_auth_off_means_everyone_is_a_guest(monkeypatch):
-    monkeypatch.delenv("SUPABASE_JWT_SECRET")
-    r = client.post("/games/create", json={"mode": "human_vs_agent"}, headers=H(secret="whatever" * 6))
+    monkeypatch.delenv("FIREBASE_PROJECT_ID")
+    r = client.post("/games/create", json={"mode": "human_vs_agent"}, headers={"Authorization": "Bearer junk"})
     assert r.status_code == 200
     assert client.get("/me").status_code == 401
 
@@ -304,91 +380,160 @@ def test_room_codes_do_not_collide_with_saved_rooms(env, monkeypatch):
     assert rooms._new_code() == "ABCDE"
 
 
-# ── Supabase store, against an emulated PostgREST ───────────────────────────
-class FakePostgrest:
-    """Just enough of PostgREST for the queries SupabaseStore issues."""
+# ── Firestore store, against a fake that enforces Firestore's real restrictions ──
+class FakeSnap:
+    def __init__(self, data):
+        self._data = data
+        self.exists = data is not None
+
+    def to_dict(self):
+        import copy
+        return copy.deepcopy(self._data)
+
+
+def _check_firestore_value(v, in_array=False):
+    """Firestore rejects arrays nested directly in arrays and documents over 1 MiB."""
+    if isinstance(v, (list, tuple)):
+        assert not in_array, "Firestore does not allow nested arrays"
+        for x in v:
+            _check_firestore_value(x, True)
+    elif isinstance(v, dict):
+        for k, x in v.items():
+            assert isinstance(k, str) and k, "map keys must be non-empty strings"
+            _check_firestore_value(x)
+
+
+class FakeDoc:
+    def __init__(self, col, id):
+        self.col, self.id = col, id
+
+    def get(self, timeout=None):
+        return FakeSnap(self.col.docs.get(self.id))
+
+    def set(self, data, merge=False, timeout=None):
+        import copy, json as _json
+        _check_firestore_value(data)
+        assert len(_json.dumps(data)) < 1_000_000
+        data = copy.deepcopy(data)
+        self.col.docs[self.id] = {**self.col.docs.get(self.id, {}), **data} if merge else data
+
+    def update(self, data, timeout=None):
+        from google.api_core.exceptions import NotFound
+        if self.id not in self.col.docs:
+            raise NotFound("no document to update")
+        _check_firestore_value(data)
+        self.col.docs[self.id] = {**self.col.docs[self.id], **data}
+
+
+class FakeQuery:
+    def __init__(self, col, filters=(), fields=None, n=None):
+        self.col, self.filters, self.fields, self.n = col, tuple(filters), fields, n
+
+    def where(self, filter):
+        return FakeQuery(self.col, self.filters + (filter,), self.fields, self.n)
+
+    def select(self, fields):
+        return FakeQuery(self.col, self.filters, fields, self.n)
+
+    def limit(self, n):
+        return FakeQuery(self.col, self.filters, self.fields, n)
+
+    def stream(self, timeout=None):
+        out = []
+        for data in self.col.docs.values():
+            ok = True
+            for f in self.filters:
+                v = data.get(f.field_path)
+                ok &= (v == f.value) if f.op_string == "==" else (f.value in (v or [])) if f.op_string == "array_contains" else False
+            if ok:
+                out.append(FakeSnap({k: x for k, x in data.items() if self.fields is None or k in self.fields}))
+        return out[: self.n]
+
+
+class FakeCollection(FakeQuery):
     def __init__(self):
-        self.tables = {"games": {}, "game_results": {}, "profiles": {}}
-        self.calls = []
-        self.keys = {"games": ("id",), "game_results": ("game_id", "user_id"), "profiles": ("user_id",)}
+        self.docs = {}
+        super().__init__(self)
 
-    def request(self, method, url, params=None, json=None, headers=None, timeout=None):
-        table = url.rsplit("/", 1)[1]
-        self.calls.append((method, table, params, headers))
-        rows = self.tables[table]
-        params = params or {}
-        if method == "POST":
-            assert params.get("on_conflict") == ",".join(self.keys[table]), "upsert must name its conflict columns"
-            assert "resolution=merge-duplicates" in headers["Prefer"]
-            for r in (json if isinstance(json, list) else [json]):
-                key = tuple(r[k] for k in self.keys[table])
-                defaults = {"finished_at": "2026-01-01T00:00:00Z"} if table == "game_results" else {}   # column defaults
-                rows[key] = {**defaults, **rows.get(key, {}), **r}
-            return self._resp(201, None)
-        out = list(rows.values())
-        for col, cond in params.items():
-            if col in ("select", "order", "limit"):
-                continue
-            op, _, val = cond.partition(".")
-            if op == "eq":
-                out = [r for r in out if str(r.get(col)) == val]
-            elif op == "cs":
-                out = [r for r in out if set(val.strip("{}").split(",")) <= set(r.get(col) or [])]
-            elif op == "in":
-                out = [r for r in out if r.get(col) in val.strip("()").split(",")]
-        if "order" in params:
-            col, _, direction = params["order"].partition(".")
-            out.sort(key=lambda r: r[col], reverse=direction == "desc")
-        return self._resp(200, out[: int(params.get("limit", 1000))])
-
-    @staticmethod
-    def _resp(status, body):
-        import json as _json
-        return type("R", (), {"status_code": status, "content": b"x" if body is not None else b"",
-                              "text": "", "json": lambda self: body})()
+    def document(self, id):
+        return FakeDoc(self, id)
 
 
-@pytest.fixture(params=["memory", "supabase"])
+class FakeFirestore:
+    def __init__(self):
+        self.collections = {}
+
+    def collection(self, name):
+        return self.collections.setdefault(name, FakeCollection())
+
+
+@pytest.fixture(params=["memory", "firestore-fake", "firestore-emulator"])
 def any_store(request):
     if request.param == "memory":
         return MemoryStore()
-    store = SupabaseStore(URL, "eyJ-service-key")
-    store.http = FakePostgrest()
-    return store
+    if request.param == "firestore-fake":
+        return FirestoreStore(client=FakeFirestore())
+    # The real thing: `firebase emulators:start --only firestore`, then FIRESTORE_EMULATOR_HOST=127.0.0.1:8080
+    import os, requests
+    host = os.getenv("FIRESTORE_EMULATOR_HOST")
+    if not host:
+        pytest.skip("set FIRESTORE_EMULATOR_HOST to run against the Firestore emulator")
+    requests.delete(f"http://{host}/emulator/v1/projects/{PID}/databases/(default)/documents", timeout=5)   # clean slate
+    return FirestoreStore(project_id=PID)
 
 
 def game_rec(gid, users, status="active", code=None, kind="solo"):
-    return {"id": gid, "kind": kind, "code": code, "mode": "human_vs_agent", "status": status, "state": {"x": 1},
-            "summary": {"current_player": "Human"}, "meta": {"seat_users": {"Human": users[0]}}, "user_ids": users}
+    return {"id": gid, "kind": kind, "code": code, "mode": "human_vs_agent", "status": status,
+            "state": {"board": [[12, 12, {"s": "x"}]], "history": [{"cells": [[1, 2], [3, 4]]}]},   # nested arrays, like a real snapshot
+            "summary": {"current_player": "Human", "players": [{"name": "Human", "score": 3}]},
+            "meta": {"seat_users": {"Human": users[0]}}, "user_ids": users}
 
 
 def test_store_contract_games(any_store):
     any_store.save_game(game_rec("g1", [ALICE]))
     any_store.save_game(game_rec("g2", [ALICE, BOB], code="ABCDE", kind="room"))
     any_store.save_game(game_rec("g3", [BOB], status="finished"))
-    assert any_store.get_game(game_id="g1")["id"] == "g1"
+    assert any_store.get_game(game_id="g1")["state"]["board"] == [[12, 12, {"s": "x"}]]    # snapshot round-trips exactly
     assert any_store.get_game(code="ABCDE")["id"] == "g2"
-    assert any_store.get_game(game_id="nope") is None
+    assert any_store.get_game(game_id="nope") is None and any_store.get_game(code="ZZZZZ") is None
     assert {g["id"] for g in any_store.list_user_games(ALICE)} == {"g1", "g2"}
     assert {g["id"] for g in any_store.list_user_games(BOB)} == {"g2"}          # g3 is finished
-    any_store.save_game({**game_rec("g1", [ALICE]), "status": "abandoned"})     # upsert replaces
+    any_store.save_game({**game_rec("g1", [ALICE]), "status": "abandoned"})     # saving again replaces
     assert {g["id"] for g in any_store.list_user_games(ALICE)} == {"g2"}
+    any_store.save_game({**game_rec("g2", [ALICE, BOB], code="ABCDE", kind="room"), "status": "finished"})
+    assert any_store.list_user_games(ALICE) == []
+
+
+def test_store_list_cards_leave_out_the_snapshot_and_internal_fields():
+    store = FirestoreStore(client=FakeFirestore())
+    store.save_game(game_rec("g1", [ALICE]))
+    card = store.list_user_games(ALICE)[0]
+    assert "state" not in card and "state_json" not in card and "active_user_ids" not in card
+    assert card["summary"]["players"][0]["score"] == 3
+    full = store.get_game(game_id="g1")
+    assert "state_json" not in full and "active_user_ids" not in full and "created_at" in full
 
 
 def test_store_contract_results_and_profiles(any_store):
-    row = lambda gid, uid: {"game_id": gid, "user_id": uid, "mode": "online", "opponent": "human", "outcome": "win",
-                            "score": 10, "opp_score": 5, "plays": 1, "swaps": 0, "passes": 0, "best_play": 10, "turns": 2}
-    any_store.save_results([row("a", ALICE), row("b", ALICE), row("a", BOB)])
-    any_store.save_results([row("a", ALICE)])                                   # idempotent
-    assert len(any_store.list_results(ALICE)) == 2 and len(any_store.list_results(BOB)) == 1
+    row = lambda gid, uid, t: {"game_id": gid, "user_id": uid, "mode": "online", "opponent": "human", "outcome": "win",
+                               "score": 10, "opp_score": 5, "plays": 1, "swaps": 0, "passes": 0, "best_play": 10,
+                               "turns": 2, "finished_at": t}
+    any_store.save_results([row("a", ALICE, "2026-01-01"), row("b", ALICE, "2026-02-01"), row("a", BOB, "2026-01-01")])
+    any_store.save_results([row("a", ALICE, "2026-01-01")])                     # idempotent
+    assert [r["game_id"] for r in any_store.list_results(ALICE)] == ["b", "a"]  # newest first
+    assert len(any_store.list_results(BOB)) == 1
     any_store.upsert_profile(ALICE, "Alice", None)
     any_store.upsert_profile(ALICE, "Alice B", "http://a")
     assert any_store.get_profile(ALICE)["display_name"] == "Alice B"
     assert any_store.get_profile(BOB) is None
 
 
-def test_supabase_key_headers():
-    legacy = SupabaseStore(URL, "eyJhbGciOi.service.role")
-    assert legacy.http.headers["apikey"] == legacy.http.headers["Authorization"].split()[1]
-    new_style = SupabaseStore(URL, "sb_secret_abc123")
-    assert new_style.http.headers["apikey"] == "sb_secret_abc123" and "Authorization" not in new_style.http.headers
+def test_firestore_is_chosen_only_when_fully_configured(monkeypatch):
+    from web.api import store as store_mod
+    for var in ("FIREBASE_PROJECT_ID", "FIREBASE_SERVICE_ACCOUNT", "GOOGLE_APPLICATION_CREDENTIALS", "FIRESTORE_EMULATOR_HOST"):
+        monkeypatch.delenv(var, raising=False)
+    store_mod.set_store(None)
+    assert store_mod.get_store().name == "memory"
+    store_mod.set_store(None)
+    monkeypatch.setenv("FIREBASE_PROJECT_ID", PID)                              # project but no credentials: don't guess
+    assert store_mod.get_store().name == "memory"

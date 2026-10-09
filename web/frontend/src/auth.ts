@@ -1,71 +1,102 @@
-import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
+import { initializeApp } from 'firebase/app';
+import {
+    GoogleAuthProvider, browserLocalPersistence, browserPopupRedirectResolver, indexedDBLocalPersistence,
+    initializeAuth, onAuthStateChanged,
+    signInWithPopup, signInWithRedirect, signOut as fbSignOut, type Auth, type User as FbUser,
+} from 'firebase/auth';
 
-const URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+const cfg = {
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string | undefined,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID as string | undefined,
+};
 
-/** False when the Supabase env vars are missing: the app then runs guest-only (no sign-in UI). */
-export const authAvailable = Boolean(URL && KEY);
+/** False when the Firebase env vars are missing: the app then runs guest-only (no sign-in UI). */
+export const authAvailable = Boolean(cfg.apiKey && cfg.authDomain && cfg.projectId);
 
-// Only create the client when configured; createClient() throws on an empty URL.
-const client: SupabaseClient | null = authAvailable
-    ? createClient(URL!, KEY!, { auth: { flowType: 'pkce', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } })
+// Only initialise when configured, so a missing config can't crash the whole app at load.
+const auth: Auth | null = authAvailable
+    ? initializeAuth(initializeApp({ apiKey: cfg.apiKey, authDomain: cfg.authDomain, projectId: cfg.projectId, appId: cfg.appId }),
+        // IndexedDB first, localStorage as a fallback. The resolver is required for popup/redirect sign-in
+        // when using initializeAuth (getAuth adds it implicitly).
+        { persistence: [indexedDBLocalPersistence, browserLocalPersistence], popupRedirectResolver: browserPopupRedirectResolver })
     : null;
 
 export interface User { id: string; name: string; email: string; avatar: string }
 
-let session: Session | null = null;
-
-function toUser(s: Session | null): User | null {
-    if (!s) return null;
-    const m = (s.user.user_metadata ?? {}) as Record<string, string | undefined>;
+function toUser(u: FbUser | null): User | null {
+    if (!u) return null;
     return {
-        id: s.user.id,
-        email: s.user.email ?? '',
-        name: m.full_name ?? m.name ?? s.user.email?.split('@')[0] ?? 'Player',
-        avatar: m.avatar_url ?? m.picture ?? '',
+        id: u.uid,
+        email: u.email ?? '',
+        name: u.displayName ?? u.email?.split('@')[0] ?? 'Player',
+        avatar: u.photoURL ?? '',
     };
 }
 
-/** The current access token (sent as `Authorization: Bearer`), or null for guests. */
-export const accessToken = (): string | null => session?.access_token ?? null;
+/** A fresh-enough ID token (Firebase refreshes it automatically), sent as `Authorization: Bearer`. */
+export async function accessToken(): Promise<string | null> {
+    return (await auth?.currentUser?.getIdToken()) ?? null;
+}
 
 /** Forces a token refresh (used when the API answers 401). Returns whether we still have a session. */
 export async function refreshToken(): Promise<boolean> {
-    if (!client) return false;
-    const { data, error } = await client.auth.refreshSession();
-    if (error || !data.session) return false;
-    session = data.session;
-    return true;
+    try { return Boolean(await auth?.currentUser?.getIdToken(true)); } catch { return false; }
 }
 
-/** Restores any saved session (also completes a pending OAuth redirect) and then reports changes. */
-export async function initAuth(onChange: (user: User | null) => void): Promise<User | null> {
-    if (!client) return null;
-    const { data } = await client.auth.getSession();
-    session = data.session;
-    // Don't call back into supabase from inside this listener; just record and notify.
-    client.auth.onAuthStateChange((_event, s) => { session = s; onChange(toUser(s)); });
-    return toUser(session);
+/** Restores a saved session (also completes a pending redirect sign-in), then reports every change. */
+export function initAuth(onChange: (user: User | null) => void): Promise<User | null> {
+    if (!auth) return Promise.resolve(null);
+    return new Promise(resolve => {
+        let first = true;
+        onAuthStateChanged(auth, fbUser => {
+            const user = toUser(fbUser);
+            if (first) { first = false; resolve(user); } else onChange(user);
+        });
+    });
 }
 
 const PENDING_ROOM = 'equadium.pendingRoom';
 
-export async function signInWithGoogle(): Promise<void> {
-    if (!client) throw new Error('Sign-in is not configured');
-    // The redirect URL must match Supabase's allow-list exactly, so it carries no query string;
-    // remember an invite link's ?room= across the round trip instead.
-    try {
-        const room = new URLSearchParams(location.search).get('room');
-        if (room) sessionStorage.setItem(PENDING_ROOM, room);
-    } catch { /* storage unavailable */ }
-    const { error } = await client.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo: location.origin + location.pathname },
-    });
-    if (error) throw error;
+const isPopupProblem = (code: string) =>
+    ['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(code);
+
+/** Turns Firebase's error codes into something a person (or whoever is setting this up) can act on. */
+function friendlyAuthError(e: unknown): Error {
+    const code = (e as { code?: string }).code ?? '';
+    const messages: Record<string, string> = {
+        'auth/unauthorized-domain': "This site isn't allowed to sign in yet. Add its domain in Firebase → Authentication → Settings → Authorized domains.",
+        'auth/operation-not-allowed': 'Google sign-in is not enabled. Turn it on in Firebase → Authentication → Sign-in method.',
+        'auth/invalid-api-key': 'The Firebase API key in this build is invalid. Check the VITE_FIREBASE_* settings.',
+        'auth/configuration-not-found': 'Firebase Authentication is not set up for this project yet.',
+        'auth/network-request-failed': "Couldn't reach Google. Check your connection and try again.",
+        'auth/internal-error': "Couldn't reach Google to sign in. Check your connection (or any ad/privacy blocker) and try again.",
+    };
+    return new Error(messages[code] ?? `Sign-in failed (${code || (e as Error).message})`);
 }
 
-/** An invite code stashed before the OAuth redirect, if any (consumed once). */
+export async function signInWithGoogle(): Promise<void> {
+    if (!auth) throw new Error('Sign-in is not configured');
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    try {
+        await signInWithPopup(auth, provider);
+    } catch (e) {
+        const code = (e as { code?: string }).code ?? '';
+        if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') return;   // user changed their mind
+        if (!isPopupProblem(code)) throw friendlyAuthError(e);
+        // Pop-ups are blocked (common on phones): fall back to a full-page redirect. Remember an
+        // invite link's ?room= code, since the page reloads.
+        try {
+            const room = new URLSearchParams(location.search).get('room');
+            if (room) sessionStorage.setItem(PENDING_ROOM, room);
+        } catch { /* storage unavailable */ }
+        try { await signInWithRedirect(auth, provider); } catch (e2) { throw friendlyAuthError(e2); }
+    }
+}
+
+/** An invite code stashed before a redirect sign-in, if any (consumed once). */
 export function takePendingRoom(): string | null {
     try {
         const r = sessionStorage.getItem(PENDING_ROOM);
@@ -75,6 +106,5 @@ export function takePendingRoom(): string | null {
 }
 
 export async function signOut(): Promise<void> {
-    await client?.auth.signOut();
-    session = null;
+    if (auth) await fbSignOut(auth);
 }

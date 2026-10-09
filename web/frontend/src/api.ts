@@ -5,9 +5,9 @@ import type { GameState, Mode, Placed, Preview, SavedGame, Stats } from './types
 const BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
 
 async function call<T>(url: string, init: RequestInit = {}, retried = false): Promise<T> {
-    // Signed-in players identify themselves with their Supabase access token.
+    // Signed-in players identify themselves with their Firebase ID token.
     const headers = new Headers(init.headers);
-    const token = accessToken();
+    const token = await accessToken();
     if (token) headers.set('Authorization', `Bearer ${token}`);
     const res = await fetch(BASE + url, { ...init, headers });
     if (res.status === 401 && token && !retried && await refreshToken()) return call<T>(url, init, true);
