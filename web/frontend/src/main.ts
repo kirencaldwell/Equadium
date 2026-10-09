@@ -1,5 +1,17 @@
 import './style.css';
+// Fonts are bundled with the app (no third-party requests): display, interface and math faces.
+import '@fontsource/cormorant-garamond/latin-600.css';
+import '@fontsource/cormorant-garamond/latin-700.css';
+import '@fontsource/cormorant-garamond/latin-500-italic.css';
+import '@fontsource/jost/latin-400.css';
+import '@fontsource/jost/latin-500.css';
+import '@fontsource/jost/latin-600.css';
+import '@fontsource/stix-two-text/latin-400.css';
+import '@fontsource/stix-two-text/latin-400-italic.css';
+import '@fontsource/stix-two-text/latin-600.css';
+import '@fontsource/stix-two-text/latin-600-italic.css';
 import { api, me, room } from './api';
+import { ico } from './icons';
 import { authAvailable, initAuth, signInWithGoogle, signOut, takePendingRoom, type User } from './auth';
 import { equation, tileHtml } from './tiles';
 import { currentState, parseHash, pushModal, pushRoute, replaceRoute, sameRoute, type Route } from './nav';
@@ -633,7 +645,7 @@ function homeHtml(): string {
         <button class="mode-card" ${disabled ? 'disabled' : `data-act="start" data-mode="${mode}"`}>
             <span class="mode-icon">${icon}</span>
             <span class="mode-text"><strong>${title}</strong><small>${blurb}</small></span>
-            ${disabled ? '<em class="soon">Soon</em>' : '<span class="chev">›</span>'}
+            ${disabled ? '<em class="soon">Soon</em>' : `<span class="chev">${ico('chevron-right')}</span>`}
         </button>`;
     return `
     <main class="home">
@@ -645,18 +657,18 @@ function homeHtml(): string {
         <p class="tagline">A calculus game</p>
         ${savedHtml()}
         <div class="modes">
-            ${card('human_vs_agent', '🧮', 'Play the Computer', 'Solo. Out-build the bot.')}
-            ${card('human_vs_human', '🤝', 'Pass &amp; Play', 'Two players, one screen.')}
-            ${card('agent_vs_agent', '🤖', 'Watch the Bots', 'Two bots battle it out.')}
+            ${card('human_vs_agent', ico('cpu'), 'Play the Computer', 'Solo. Out-build the bot.')}
+            ${card('human_vs_human', ico('pair'), 'Pass &amp; Play', 'Two players, one screen.')}
+            ${card('agent_vs_agent', ico('eye'), 'Watch the Bots', 'Two bots battle it out.')}
             <button class="mode-card" data-act="online">
-                <span class="mode-icon">🌐</span>
+                <span class="mode-icon">${ico('globe')}</span>
                 <span class="mode-text"><strong>Play a Friend Online</strong><small>Share a code, play from anywhere.</small></span>
-                <span class="chev">›</span>
+                <span class="chev">${ico('chevron-right')}</span>
             </button>
             ${resume ? `<button class="mode-card resume" data-act="online-resume">
-                <span class="mode-icon">▶</span>
+                <span class="mode-icon">${ico('play')}</span>
                 <span class="mode-text"><strong>Resume your game</strong><small>Code ${resume.code}</small></span>
-                <span class="chev">›</span>
+                <span class="chev">${ico('chevron-right')}</span>
             </button>` : ''}
         </div>
         ${authAvailable && !S.user ? '<p class="muted small center">Sign in to keep your games and stats across devices.</p>' : ''}
@@ -700,7 +712,7 @@ function savedHtml(): string {
             <button class="saved-main" data-act="resume-saved" data-i="${i}">
                 <span class="saved-text"><strong>${title}</strong><small>${state}</small></span>${score}
             </button>
-            ${online ? '' : `<button class="saved-del" data-act="delete-saved" data-i="${i}" aria-label="Delete game">✕</button>`}
+            ${online ? '' : `<button class="saved-del" data-act="delete-saved" data-i="${i}" aria-label="Delete game">${ico('close')}</button>`}
         </div>`;
     }).join('');
     return `<section class="saved"><h3>Your games</h3>${cards}</section>`;
@@ -725,7 +737,7 @@ function statsHtml(): string {
             <span>${r.opponent === 'agent' ? 'Computer' : r.mode === 'online' ? 'Online friend' : 'Friend'}</span>
             <strong>${r.score}–${r.opp_score}</strong><small>${ago(r.finished_at)}</small></div>`).join('')}</div>`;
     return `<main class="home stats">
-        <header class="stats-head"><button class="icon" data-act="home" aria-label="Back">‹</button><h2>Your stats</h2><span></span></header>
+        <header class="stats-head"><button class="icon" data-act="home" aria-label="Back">${ico('chevron-left')}</button><h2>Your stats</h2><span></span></header>
         ${body}</main>`;
 }
 
@@ -738,16 +750,16 @@ function onlineHtml(): string {
             <input id="name" maxlength="16" autocomplete="nickname" placeholder="Player" value="${(savedName() || S.user?.name || '').replace(/"/g, '&quot;')}"></label>
         <div class="modes">
             <button class="mode-card" data-act="online-create">
-                <span class="mode-icon">✨</span>
+                <span class="mode-icon">${ico('plus')}</span>
                 <span class="mode-text"><strong>Start a new game</strong><small>Get a code to send to a friend.</small></span>
-                <span class="chev">›</span>
+                <span class="chev">${ico('chevron-right')}</span>
             </button>
         </div>
         <div class="join-row">
             <input id="code" maxlength="5" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="CODE" value="${incoming}">
             <button class="primary" data-act="online-join">Join</button>
         </div>
-        <button class="link" data-act="home">‹ Back</button>
+        <button class="link" data-act="home">Back</button>
     </main>`;
 }
 
@@ -756,7 +768,7 @@ function lobbyHtml(g: GameState): string {
     return `
     <div class="game">
         <header class="bar">
-            <button class="icon" data-act="home" aria-label="Menu">‹</button>
+            <button class="icon" data-act="home" aria-label="Menu">${ico('chevron-left')}</button>
             <span class="wordmark small">Equadium</span>
             <button class="icon" data-act="help" aria-label="How to play">?</button>
         </header>
@@ -865,10 +877,10 @@ function actionsHtml(g: GameState): string {
     const can = myTurn();
     const playable = can && !!S.preview?.valid;
     return `<div class="actions">
-        <button class="ghost" data-act="shuffle" ${can ? '' : 'disabled'} aria-label="Shuffle">⇄<small>Shuffle</small></button>
-        <button class="ghost" data-act="recall" ${can && S.placed.length ? '' : 'disabled'} aria-label="Recall">↺<small>Recall</small></button>
-        <button class="ghost" data-act="swap" ${can && g.bag_count > 0 && !S.placed.length ? '' : 'disabled'} aria-label="Swap">⇅<small>Swap</small></button>
-        <button class="ghost" data-act="pass" ${can && !S.placed.length ? '' : 'disabled'} aria-label="Pass">⏭<small>Pass</small></button>
+        <button class="ghost" data-act="shuffle" ${can ? '' : 'disabled'} aria-label="Shuffle">${ico('shuffle')}<small>Shuffle</small></button>
+        <button class="ghost" data-act="recall" ${can && S.placed.length ? '' : 'disabled'} aria-label="Recall">${ico('undo')}<small>Recall</small></button>
+        <button class="ghost" data-act="swap" ${can && g.bag_count > 0 && !S.placed.length ? '' : 'disabled'} aria-label="Swap">${ico('swap')}<small>Swap</small></button>
+        <button class="ghost" data-act="pass" ${can && !S.placed.length ? '' : 'disabled'} aria-label="Pass">${ico('skip')}<small>Pass</small></button>
         <button class="primary" data-act="play" ${playable ? '' : 'disabled'}>Play${playable ? ` · +${S.preview!.score}` : ''}</button>
     </div>`;
 }
@@ -877,7 +889,7 @@ function watchBarHtml(): string {
     const sp = S.watch.speed;
     const opt = (ms: number, label: string) => `<button class="seg ${sp === ms ? 'on' : ''}" data-act="speed" data-ms="${ms}">${label}</button>`;
     return `<div class="watch-bar">
-        <button class="primary small" data-act="watch-toggle">${S.watch.running ? '❚❚ Pause' : '▶ Play'}</button>
+        <button class="primary small" data-act="watch-toggle">${S.watch.running ? `${ico('pause')} Pause` : `${ico('play')} Play`}</button>
         <button class="ghost wide" data-act="watch-step" ${S.watch.running || S.game?.game_over ? 'disabled' : ''}>Step</button>
         <div class="segs">${opt(1800, 'Slow')}${opt(900, 'Med')}${opt(250, 'Fast')}</div>
     </div>`;
@@ -903,10 +915,10 @@ function gameHtml(): string {
     return `
     <div class="game ${S.shake ? 'shake' : ''} ${S.busy ? 'busy' : ''}">
         <header class="bar">
-            <button class="icon" data-act="home" aria-label="Menu">‹</button>
+            <button class="icon" data-act="home" aria-label="Menu">${ico('chevron-left')}</button>
             <span class="wordmark small">Equadium</span>
             <span class="bar-right">
-                ${canForfeit(g) ? '<button class="icon flag" data-act="forfeit" aria-label="Forfeit game" title="Forfeit">⚑</button>' : ''}
+                ${canForfeit(g) ? `<button class="icon flag" data-act="forfeit" aria-label="Forfeit game" title="Forfeit">${ico('flag')}</button>` : ''}
                 <button class="icon" data-act="help" aria-label="How to play">?</button>
             </span>
         </header>
@@ -915,9 +927,9 @@ function gameHtml(): string {
         <div class="board-wrap">
             <div class="board-scroll" id="board-scroll">${boardHtml(g)}</div>
             <div class="zoom">
-                <button class="icon round" data-act="zoom-in" aria-label="Zoom in">+</button>
-                <button class="icon round" data-act="zoom-out" aria-label="Zoom out">−</button>
-                <button class="icon round" data-act="center" aria-label="Centre board">◎</button>
+                <button class="icon round" data-act="zoom-in" aria-label="Zoom in">${ico('plus')}</button>
+                <button class="icon round" data-act="zoom-out" aria-label="Zoom out">${ico('minus')}</button>
+                <button class="icon round" data-act="center" aria-label="Centre board">${ico('target')}</button>
             </div>
         </div>
         ${dockHtml(g)}
@@ -934,7 +946,7 @@ function modalHtml(): string {
                 <li><b>Build equations</b> across and down, like a crossword. Both sides must be equal: <span class="eg">${equation('x+x=2x')}</span></li>
                 <li>Every play must <b>connect</b> to tiles already on the board.</li>
                 <li>You get <b>one free <span class="eg">=</span></b> each turn.</li>
-                <li><span class="eg">${equation('d/dx(')}</span> and <span class="eg">∫(</span> tiles multiply your score by <b>×2</b> and <b>×3</b>. An integral needs <span class="eg">+C</span>. Stack two <span class="eg">${equation('d/dx(')}</span> tiles for a second derivative and <b>×4</b>.</li>
+                <li><span class="eg">${equation('d/dx(')}</span> and <span class="eg">${equation('int(')}</span> tiles multiply your score by <b>×2</b> and <b>×3</b>. An integral needs <span class="eg">+C</span>. Stack two <span class="eg">${equation('d/dx(')}</span> tiles for a second derivative and <b>×4</b>.</li>
                 <li>The game ends when someone runs out of tiles, or nobody can play.</li>
             </ol>
             <button class="primary" data-act="close">Got it</button>`;
