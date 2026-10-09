@@ -92,6 +92,19 @@ precomputed table (`core/math_playbook.py`, kept as a baseline: it grows as tile
 table takes many minutes to build). It enumerates what the rack can spell, fingerprints each expression
 numerically, and joins equal fingerprints (meet in the middle); SymPy only verifies the final candidates.
 
+## Keeping the agent fast
+
+The agent's slowest work (SymPy integrals and a few parser quirks) is deterministic, so it is precomputed into
+`core/search_cache.json` and loaded at startup. **Regenerate it whenever you add/remove tiles in
+`core/game_config.py` or change `core/math_engine.py`:**
+
+```
+python -m core.precompute_search_cache      # ~15 s on 4 cores; use the SymPy version pinned in requirements.txt
+```
+A stale file is ignored (the agent still works, just slowly on small servers) and a test fails to remind you.
+Each computer turn also has a soft time budget (default 6 s, `EQUADIUM_AGENT_TIME_BUDGET`): on a slow host the
+agent stops deepening and skips uncached work, so it plays slightly weaker moves instead of making you wait.
+
 ## Tests
 
 ```

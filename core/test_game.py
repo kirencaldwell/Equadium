@@ -238,3 +238,80 @@ def test_roundtrip_keeps_tile_values_even_if_config_changes():
         t["points"] += 100
     loaded = GameSession.from_dict(data, retuned)
     assert loaded.to_dict() == data
+
+
+# ── search agent speed: shared caches, precomputed file, time budget ─────────
+def test_precomputed_search_cache_is_current_and_covers_every_tile():
+    """If this fails, tiles or math_engine.py changed: run `python -m core.precompute_search_cache`."""
+    import json
+    from core import search_agent as sa
+    with open(sa.CACHE_FILE) as f:
+        data = json.load(f)
+    assert data["header"] == sa.cache_header(), "search_cache.json is stale; regenerate it"
+    tiles = list(SearchAgent("t", CONFIG).value_tiles)
+    sep = sa._SEP
+    assert all(sep.join(("p", a, b)) in data["pairs"] for a in tiles for b in tiles)
+    assert all(sep.join(("e<", s)) in data["pairs"] and sep.join(("e>", s)) in data["pairs"] for s in tiles)
+    for t in tiles:
+        assert sep.join(("d/dx", t)) in data["calculus"] and sep.join(("int", t)) in data["calculus"]
+
+
+def test_precomputed_values_match_fresh_computation():
+    import json
+    from core import search_agent as sa
+    from core.math_engine import MathEngine
+    engine = MathEngine(CONFIG)
+    with open(sa.CACHE_FILE) as f:
+        data = json.load(f)
+    rng = random.Random(7)
+    for key in rng.sample(sorted(data["calculus"]), 25):
+        kind, *toks = key.split(sa._SEP)
+        fresh, stored = sa.compute_calculus_vec(engine, kind, tuple(toks)), data["calculus"][key]
+        assert (fresh is None) == (stored is None), key
+        if fresh is not None:
+            assert all(abs(a - b) < 1e-9 * max(1, abs(a)) for a, b in zip(fresh, stored)), key
+    for key in rng.sample(sorted(data["pairs"]), 25):
+        kind, *toks = key.split(sa._SEP)
+        a, b = (toks[0], toks[1]) if kind == "p" else (toks[0], None) if kind == "e<" else (None, toks[0])
+        sa._PAIR_CACHE.pop((kind, *toks), None)                       # force a real recomputation
+        assert sa.pair_is_bad(engine, kind, a, b) == data["pairs"][key], key
+
+
+def test_blacklist_is_computed_once_and_shared_between_agents():
+    import time
+    s = fresh_session("agent_vs_agent")
+    SearchAgent("a", CONFIG)._adjacency_blacklist(s.game)          # warms the shared cache (or loads from file)
+    start = time.time()
+    second = SearchAgent("b", CONFIG)
+    assert second._adjacency_blacklist(s.game)
+    assert time.time() - start < 0.5                                  # a brand-new agent/game does not recompute
+
+
+def test_stale_cache_file_is_ignored(tmp_path):
+    import json
+    from core import search_agent as sa
+    stale = tmp_path / "c.json"
+    stale.write_text(json.dumps({"header": {**sa.cache_header(), "engine": "deadbeef"},
+                                 "pairs": {sa._SEP.join(("p", "zzz", "yyy")): True}, "calculus": {}}))
+    assert sa.load_cache_file(str(stale)) is False
+    assert ("p", "zzz", "yyy") not in sa._PAIR_CACHE                  # nothing from a stale file leaks in
+    assert sa.load_cache_file(str(tmp_path / "missing.json")) is False
+
+
+def test_time_budget_bounds_a_cold_turn(monkeypatch):
+    """On a slow host the agent must give a (possibly weaker) answer quickly rather than grind through SymPy."""
+    import time
+    from core import search_agent as sa
+    random.seed(5)
+    s = GameSession("agent_vs_agent", CONFIG)
+    for _ in range(14):                                               # a realistic mid-game board
+        s.step_agent()
+    s.current_player.rack = tiles("d/dx(", "int(", ")", "C", "+", "=", "x", "x**2", "2", "3", "sin(x)", "cos(x)", "(x+a)", "a", "b")
+    monkeypatch.setattr(sa, "_CALCULUS_CACHE", {})                    # cold: every integral would need computing
+    agent = SearchAgent("slow", CONFIG, time_budget=0.3)
+    start = time.time()
+    move = agent.find_best_move(s.game)
+    elapsed = time.time() - start
+    assert elapsed < 3.0, f"cold turn took {elapsed:.1f}s despite a 0.3s budget"
+    assert move is None or move.is_play
+    assert agent.stats["budget_skips"] > 0 or agent.stats["budget_hits"] > 0
