@@ -13,7 +13,7 @@ import '@fontsource/stix-two-text/latin-600-italic.css';
 import { api, me, room } from './api';
 import { ico } from './icons';
 import { authAvailable, initAuth, signInWithGoogle, signOut, takePendingRoom, type User } from './auth';
-import { equation, tileHtml } from './tiles';
+import { equation, math, tileHtml } from './tiles';
 import { currentState, parseHash, pushModal, pushRoute, replaceRoute, sameRoute, type Route } from './nav';
 import type { GameState, Mode, Placed, Preview, SavedGame, Stats, Tile } from './types';
 
@@ -58,7 +58,7 @@ const S = {
     rackOrder: [] as number[],
     preview: null as Preview | null,
     busy: null as null | 'submitting' | 'thinking',
-    modal: null as null | 'help' | 'swap' | 'pass' | 'forfeit' | 'handoff' | 'over' | 'account',
+    modal: null as null | 'help' | 'calc' | 'swap' | 'pass' | 'forfeit' | 'handoff' | 'over' | 'account',
     swapPick: new Set<number>(),
     handoffFor: null as string | null,
     zoom: 1,
@@ -126,7 +126,7 @@ function resetTurnState() {
 // Navigation: every screen is a history entry, so the browser's Back/Forward buttons (and a phone's back
 // gesture) move between screens instead of leaving the site. See nav.ts for the URL scheme.
 // ─────────────────────────────────────────────
-const DISMISSABLE = new Set(['help', 'swap', 'pass', 'forfeit', 'account']);
+const DISMISSABLE = new Set(['help', 'calc', 'swap', 'pass', 'forfeit', 'account']);
 let modalEntry = false;   // the top history entry is a pop-up we pushed, so Back should just close it
 let swallowPop = 0;       // popstate events we caused ourselves (closing a pop-up); ignored by the handler
 
@@ -919,6 +919,7 @@ function gameHtml(): string {
             <span class="wordmark small">Equadium</span>
             <span class="bar-right">
                 ${canForfeit(g) ? `<button class="icon flag" data-act="forfeit" aria-label="Forfeit game" title="Forfeit">${ico('flag')}</button>` : ''}
+                <button class="icon calc" data-act="calc" aria-label="Derivative and integral table" title="Calculus cheat sheet">∫</button>
                 <button class="icon" data-act="help" aria-label="How to play">?</button>
             </span>
         </header>
@@ -936,6 +937,25 @@ function gameHtml(): string {
     </div>`;
 }
 
+const CALC_ROWS: [string, string, string][] = [
+    ['k', '0', 'kx'],
+    ['x', '1', '1/2x**2'],
+    ['x**2', '2x', '1/3x**3'],
+    ['x**3', '3x**2', '1/4x**4'],
+    ['x**4', '4x**3', '1/5x**5'],
+    ['1/x', '-<span class="frac"><i>1</i><i>x<sup>2</sup></i></span>', 'ln(x)'],
+    ['e^x', 'e^x', 'e^x'],
+    ['sin(x)', 'cos(x)', '-cos(x)'],
+    ['cos(x)', '-sin(x)', 'sin(x)'],
+    ['ln(x)', '1/x', 'xln(x)-x'],
+];
+
+function calcTableHtml(): string {
+    const head = `<div class="ct-row ct-head"><span>f(x)</span><span>${math('d/dx(')}f)</span><span>${math('int(')}f) +C</span></div>`;
+    const rows = CALC_ROWS.map(([f, d, i]) => `<div class="ct-row"><span>${math(f)}</span><span>${d.startsWith('-<') ? d : math(d)}</span><span>${math(i)}</span></div>`).join('');
+    return `<div class="ctable" role="table">${head}${rows}</div>`;
+}
+
 function modalHtml(): string {
     const g = S.game;
     let body = '';
@@ -950,6 +970,17 @@ function modalHtml(): string {
                 <li>The game ends when someone runs out of tiles, or nobody can play.</li>
             </ol>
             <button class="primary" data-act="close">Got it</button>`;
+            break;
+        case 'calc':
+            body = `<h2>Calculus cheat sheet</h2>
+            <p class="muted">Derivatives and integrals of the tiles in play.</p>
+            ${calcTableHtml()}
+            <ul class="rules calc-rules">
+                <li><b>Constants</b> pull out: <span class="eg">${equation('d/dx(2x**2)=4x')}</span></li>
+                <li><b>Sums</b> go term by term: <span class="eg">${equation('d/dx(x**2+x)=2x+1')}</span></li>
+                <li>Every integral needs <span class="eg">+C</span>.</li>
+            </ul>
+            <button class="primary" data-act="close">Close</button>`;
             break;
         case 'swap': {
             const rack = myRack();
@@ -999,7 +1030,7 @@ function modalHtml(): string {
         default:
             return '';
     }
-    const dismissable = S.modal === 'help' || S.modal === 'swap' || S.modal === 'pass' || S.modal === 'forfeit' || S.modal === 'account';
+    const dismissable = S.modal === 'help' || S.modal === 'calc' || S.modal === 'swap' || S.modal === 'pass' || S.modal === 'forfeit' || S.modal === 'account';
     const enter = lastModal !== S.modal ? 'enter' : '';
     return `<div class="scrim ${S.modal} ${enter}" ${dismissable ? 'data-act="close-scrim"' : ''}><div class="modal ${S.modal} ${enter}" role="dialog">${body}</div></div>`;
 }
@@ -1072,6 +1103,7 @@ app.addEventListener('click', (e) => {
             case 'resume-saved': { const g = S.saved[Number(actEl.dataset.i)]; if (g) void resumeSaved(g); break; }
             case 'delete-saved': { const g = S.saved[Number(actEl.dataset.i)]; if (g) void deleteSaved(g); break; }
             case 'help': openModal('help'); break;
+            case 'calc': openModal('calc'); break;
             case 'close': case 'close-scrim': closeModal(); break;
             case 'home': goHome(); break;
             case 'pick': {
