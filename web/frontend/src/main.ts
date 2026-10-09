@@ -895,6 +895,12 @@ function previewHtml(): string {
     if (p.valid) {
         return `<div class="preview good"><span class="eqs">${p.equations.map(equation).join('<span class="sep">·</span>')}</span><span class="pill">+${p.score}</span></div>`;
     }
+    const bad = p.reason?.match(/^'(.+)' is not a valid equation \((.*)\)$/);
+    if (bad) {
+        // the engine's message for a plain math mismatch is "Valid"; anything else is a layout problem
+        const why = bad[2] === 'Valid' ? "doesn't balance. Every row and column your tiles touch must be true." : "isn't a complete equation yet.";
+        return `<div class="preview hint bad"><span class="eqs">${equation(bad[1])}</span><span class="why">${why}</span></div>`;
+    }
     return `<div class="preview hint">${p.reason ? humanReason(p.reason) : 'Keep building…'}</div>`;
 }
 
