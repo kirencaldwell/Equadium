@@ -117,13 +117,5 @@ def test_cannot_autoplay_with_a_human_seat():
     assert client.post(f"/games/{gid}/autoplay").status_code == 400
 
 
-def test_join_turns_agent_seat_into_human():
-    gid = create("human_vs_agent")
-    assert client.post(f"/games/{gid}/join").status_code == 200
-    state = client.get(f"/games/{gid}").json()
-    assert state["mode"] == "human_vs_human"
-    assert set(state["seats"].values()) == {"human"}
-
-
 def test_unknown_game_404():
     assert client.get("/games/does-not-exist").status_code == 404

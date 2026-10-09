@@ -200,6 +200,52 @@ class EquadiumGame:
             self._rollback(move_tiles)
         return equations_data, None
 
+    # ------------------------------------------------------------------
+    # Persistence. Tiles are stored with their own points/multipliers (not
+    # looked up in CONFIG), so a saved game stays valid if tile values are
+    # retuned later.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _tile_to_dict(t: Tile) -> dict:
+        return {"s": t.symbol, "p": t.points, "m": t.expr_multiplier}
+
+    @staticmethod
+    def _tile_from_dict(d: dict) -> Tile:
+        return Tile(d["s"], d["p"], d.get("m", 1))
+
+    def to_dict(self) -> dict:
+        td = self._tile_to_dict
+        return {
+            "players": [{"name": p.name, "score": p.score, "equals_available": p.equals_available,
+                         "rack": [td(t) for t in p.rack]} for p in self.players],
+            "board": [[r, c, td(t)] for r, row in enumerate(self.board.grid) for c, t in enumerate(row) if t],
+            "tile_bag": [td(t) for t in self.tile_bag],
+            "equals_bag": [td(t) for t in self.equals_bag],
+            "current_turn_index": self.current_turn_index,
+            "turns_played": self.turns_played,
+            "consecutive_non_plays": self.consecutive_non_plays,
+            "stats": {name: vars(st).copy() for name, st in self.stats.items()},
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict, config: dict, verbose: bool = False) -> "EquadiumGame":
+        game = cls([p["name"] for p in d["players"]], config, verbose=verbose, seed_center=False)
+        fd = cls._tile_from_dict
+        for player, pd in zip(game.players, d["players"]):
+            player.score = pd["score"]
+            player.equals_available = pd["equals_available"]
+            player.rack = [fd(t) for t in pd["rack"]]
+        game.board.grid = [[None] * game.board.width for _ in range(game.board.height)]
+        for r, c, t in d["board"]:
+            game.board.grid[r][c] = fd(t)
+        game.tile_bag = [fd(t) for t in d["tile_bag"]]
+        game.equals_bag = [fd(t) for t in d["equals_bag"]]
+        game.current_turn_index = d["current_turn_index"]
+        game.turns_played = d["turns_played"]
+        game.consecutive_non_plays = d["consecutive_non_plays"]
+        game.stats = {name: PlayerStats(**st) for name, st in d["stats"].items()}
+        return game
+
     def display_scoreboard(self):
         """Prints a clean status update of the current game standings."""
         print("\n" + "─" * 40)

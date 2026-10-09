@@ -234,3 +234,50 @@ button:disabled { cursor: default; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 .lobby .muted { color: var(--muted); margin: 0; font-size: 15px; }
+
+/* ───────────── Accounts ───────────── */
+.home { position: relative; }
+.home-top { position: absolute; top: calc(10px + env(safe-area-inset-top)); right: 14px; }
+.chip { display: flex; align-items: center; gap: 8px; padding: 5px 12px 5px 5px; border-radius: 999px; background: var(--surface); border: 1.5px solid var(--line); font-size: 14px; font-weight: 600; max-width: 180px; }
+.chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip:hover { border-color: var(--ink); }
+.chip.signin { padding: 8px 16px; }
+.avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex: none; }
+.avatar.letter { display: grid; place-items: center; background: var(--t-num); color: #1a1a1a; font-family: var(--serif); font-weight: 800; font-size: 15px; }
+.account-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.account-head .avatar { width: 48px; height: 48px; font-size: 22px; }
+.account-head div { display: grid; min-width: 0; }
+.account-head strong { font-size: 18px; }
+.account-head small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.ghost.full { width: 100%; margin-top: 10px; }
+.center { text-align: center; }
+.muted.small { font-size: 13px; }
+
+.saved { width: 100%; margin: -6px 0 18px; display: grid; gap: 8px; }
+.saved h3 { margin: 0 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.saved-card { display: flex; align-items: stretch; background: var(--surface); border: 1.5px solid var(--line); border-radius: 14px; overflow: hidden; }
+.saved-card.turn { border-color: var(--ink); box-shadow: 0 3px 0 var(--ink); }
+.saved-main { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 14px; text-align: left; min-width: 0; }
+.saved-text { display: grid; gap: 1px; min-width: 0; }
+.saved-text small { color: var(--muted); font-size: 12.5px; }
+.score-line { font-family: var(--serif); font-weight: 800; font-size: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.score-line i { font-style: normal; color: var(--muted); margin: 0 3px; font-weight: 600; }
+.saved-del { width: 40px; color: var(--muted); font-size: 14px; border-left: 1.5px solid var(--line); }
+.saved-del:hover { color: var(--t-calc-edge); background: var(--bg); }
+
+.stats { padding-top: 14px; }
+.stats-head { width: 100%; display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.stats-head h2 { font-family: var(--serif); font-weight: 800; font-size: 26px; margin: 0; letter-spacing: -.02em; }
+.stats-head span { width: 38px; }
+.stat-grid { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stat { display: grid; gap: 2px; justify-items: center; padding: 14px 6px; background: var(--surface); border: 1.5px solid var(--line); border-radius: 14px; text-align: center; }
+.stat strong { font-family: var(--serif); font-weight: 800; font-size: 26px; font-variant-numeric: tabular-nums; }
+.stat span { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.recent-title { align-self: flex-start; margin: 22px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.recent { width: 100%; display: grid; gap: 6px; }
+.recent-row { display: grid; grid-template-columns: 28px 1fr auto auto; gap: 10px; align-items: center; padding: 9px 12px; background: var(--surface); border: 1.5px solid var(--line); border-radius: 12px; font-size: 14px; }
+.recent-row small { color: var(--muted); font-size: 12px; min-width: 56px; text-align: right; }
+.pill { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; font-weight: 700; font-size: 13px; background: var(--line); }
+.pill.win { background: var(--good); color: #fff; }
+.pill.loss { background: var(--t-calc); color: #1a1a1a; }
+.pill.tie { background: var(--t-num); color: #1a1a1a; }

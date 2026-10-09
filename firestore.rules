@@ -1,0 +1,11 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Every read and write goes through the Equadium API, which uses a service account
+    // (service accounts bypass these rules). Clients get no direct access: game documents hold
+    // secret room tokens and each player's tiles.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
