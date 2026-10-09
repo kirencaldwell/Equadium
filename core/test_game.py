@@ -188,6 +188,27 @@ def test_fraction_tile_is_its_own_factor(equation):
     assert ok, msg
 
 
+# ---- chained equalities (a = b = c) ----
+@pytest.mark.parametrize("equation,expected", [
+    ("41/xx=2+2=4", True),
+    ("x=x=x", True),
+    ("x=x=2x", False),          # the second link fails
+    ("2+2=4=x", False),
+    ("int(x)=1/2x**2+C=int(x)", True),
+    ("x==x", False),             # empty part
+])
+def test_chained_equalities(equation, expected):
+    ok, _ = fresh_session().game.math.validate_equation(equation)
+    assert ok is expected
+
+
+def test_chained_equality_can_be_played_on_the_board():
+    s = fresh_session(rack0=["4", "1/x", "=", "2", "+", "2", "=", "4"])
+    cells = place(s.game, ["4", "1/x"], (CENTER[0], CENTER[1] - 2)) + place(s.game, ["=", "2", "+", "2", "=", "4"], (CENTER[0], CENTER[1] + 1))
+    rec = s.play("Player1", cells, "H")
+    assert rec.ok, rec.error
+
+
 # ---- subtraction ("-") tile ----
 @pytest.mark.parametrize("equation", [
     "x**2-x=x**2-x",
