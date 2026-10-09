@@ -57,3 +57,29 @@ export interface Preview {
     equations: string[];
     score: number;
 }
+
+/** An unfinished game that the signed-in player can resume on any device. */
+export interface SavedGame {
+    kind: 'solo' | 'room';
+    id: string;
+    code: string | null;
+    mode: Mode;
+    status: 'waiting' | 'active';
+    seat: string | null;
+    /** only present for rooms: lets the usual seat-token flow resume the game */
+    token: string | null;
+    current_player: string | null;
+    your_turn: boolean;
+    players: { name: string; label: string | null; score: number }[];
+    turns_played: number;
+    updated_at: string;
+}
+
+export interface Stats {
+    games: number; wins: number; losses: number; ties: number;
+    win_rate: number; avg_score: number; best_score: number; best_play: number;
+    total_plays: number; win_streak: number;
+    vs_computer: { games: number; wins: number };
+    vs_humans: { games: number; wins: number };
+    recent: { game_id: string; mode: string; opponent: 'agent' | 'human'; outcome: 'win' | 'loss' | 'tie'; score: number; opp_score: number; finished_at: string }[];
+}

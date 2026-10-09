@@ -5,13 +5,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 
 import logging
 import json
+import secrets
+import threading
 from datetime import datetime
 from typing import List, Optional
 
-import jwt  # PyJWT
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException, Request, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from web.api.models import MoveModel, CreateGameModel, SwapModel
@@ -19,39 +19,11 @@ from web.api.serialize import game_to_model, tile_to_model, _tiles_from_model
 from core.game_config import CONFIG
 from core.game_entities import Tile
 from core.session import GameSession, MODES, HUMAN
+from web.api import persistence
+from web.api.auth import AuthUser, optional_user
+from web.api.store import get_store
 
 load_dotenv()
-
-# ── JWT validation ──────────────────────────────────────────────────────────
-# Set SUPABASE_JWT_SECRET in your .env (Project Settings → API → JWT Secret)
-SUPABASE_JWT_SECRET: Optional[str] = os.getenv("SUPABASE_JWT_SECRET")
-
-_bearer_scheme = HTTPBearer(auto_error=False)
-
-def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme)
-) -> Optional[str]:
-    """Decode a Supabase JWT and return the user's UUID (sub claim).
-    Returns None when no token is present (allows unauthenticated solo games).
-    Raises 401 when a token is present but invalid.
-    """
-    if credentials is None:
-        return None
-    if not SUPABASE_JWT_SECRET:
-        # JWT validation not configured – accept token as-is for local dev
-        return None
-    try:
-        payload = jwt.decode(
-            credentials.credentials,
-            SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
-        return payload.get("sub")  # Supabase user UUID
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.InvalidTokenError as exc:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {exc}")
 
 # Ensure logs directory exists
 os.makedirs("web/api/logs", exist_ok=True)
@@ -69,7 +41,7 @@ app = FastAPI()
 
 # The frontend (e.g. on Vercel) calls this API from another origin.
 # ALLOWED_ORIGINS is a comma-separated list, e.g. "https://equadium.vercel.app".
-from web.api import rooms  # noqa: E402  (after app setup is fine; no circular import)
+from web.api import rooms, me  # noqa: E402  (after app setup is fine; no circular import)
 
 app.add_middleware(
     CORSMiddleware,
@@ -79,8 +51,10 @@ app.add_middleware(
 )
 
 app.include_router(rooms.router)
+app.include_router(me.router)
 
-sessions = {}  # game_id -> GameSession (simple in-memory storage)
+sessions = {}  # game_id -> GameSession (in-memory cache; signed-in games are also saved to the store)
+_locks = {}    # game_id -> Lock, so two requests can't move the same game at once
 
 # Middleware for structured request logging
 @app.middleware("http")
@@ -124,26 +98,52 @@ def log_game_state(game_id, game, action_type, extra=None):
     }
     logger.info(json.dumps(log_entry))
 
-def _get_session(game_id: str) -> GameSession:
-    if game_id not in sessions:
-        raise HTTPException(status_code=404, detail="Game not found")
-    return sessions[game_id]
-
-# ── Turn ownership helpers ──────────────────────────────────────────────────
-def _is_multiplayer(session) -> bool:
-    return getattr(session, '_guest_user_id', None) is not None
+def _lock_for(game_id: str) -> threading.Lock:
+    return _locks.setdefault(game_id, threading.Lock())
 
 
-def _assert_player_turn(session, current_user: Optional[str]):
-    """In an authenticated multiplayer game, ensure it's actually this user's turn."""
-    if not _is_multiplayer(session) or current_user is None:
-        return  # Solo game or unauthenticated – no restriction
-    owner = getattr(session, '_owner_user_id', None)
-    guest = getattr(session, '_guest_user_id', None)
-    # Player 0 == owner, Player 1 == guest
-    expected_user = owner if session.game.current_turn_index == 0 else guest
-    if current_user != expected_user:
-        raise HTTPException(status_code=403, detail="Not your turn")
+def _seat_users(session: GameSession) -> dict:
+    owner = getattr(session, "owner_id", None)
+    return {session.human_seats()[0]: owner} if owner and len(session.human_seats()) >= 1 else {}
+
+
+def _get_session(game_id: str, user: Optional[AuthUser] = None) -> GameSession:
+    """Finds a solo game (memory first, then the store) and checks the caller may use it.
+    Games owned by a signed-in user are private to them; guest games are reachable by their
+    (unguessable) id."""
+    session = sessions.get(game_id)
+    if session is None:
+        try:
+            rec = get_store().get_game(game_id=game_id)
+        except Exception:
+            logger.exception("Could not load game %s", game_id)
+            rec = None
+        if not rec or rec.get("kind") != "solo":
+            raise HTTPException(status_code=404, detail="Game not found")
+        session = GameSession.from_dict(rec["state"])
+        owners = rec["user_ids"]
+        session.owner_id = owners[0] if owners else None
+        sessions[game_id] = session
+        if session.is_over and rec["status"] != "finished":   # a finish that failed to save: retry
+            persistence.finalize_if_over(game_id, "solo", session, _seat_users(session))
+    owner = getattr(session, "owner_id", None)
+    if owner is not None:
+        if user is None:
+            raise HTTPException(status_code=401, detail="Sign in to open this game")
+        if user.id != owner:
+            raise HTTPException(status_code=404, detail="Game not found")
+    return session
+
+
+def _save(game_id: str, session: GameSession) -> None:
+    """Write-through save for signed-in players' games (guests' games stay in memory)."""
+    users = _seat_users(session)
+    if not users or session.mode == "agent_vs_agent":
+        return
+    if session.is_over:
+        persistence.finalize_if_over(game_id, "solo", session, users)
+    else:
+        persistence.save_game(game_id, "solo", session, users)
 
 
 def _acting_player(session, player: Optional[str]) -> str:
@@ -182,41 +182,26 @@ def list_modes():
 
 
 @app.post("/games/create")
-def create_game(body: Optional[CreateGameModel] = None,
-                current_user: Optional[str] = Depends(get_current_user)):
+def create_game(body: Optional[CreateGameModel] = None, user: Optional[AuthUser] = Depends(optional_user)):
     mode = body.mode if body else "human_vs_agent"
     if mode not in MODES:
         raise HTTPException(status_code=400, detail=f"Unknown mode '{mode}'. Choose from: {', '.join(MODES)}")
-    game_id = str(len(sessions))
+    game_id = secrets.token_urlsafe(9)
     session = GameSession(mode, CONFIG, verbose=True)
+    session.owner_id = user.id if user and mode != "agent_vs_agent" else None
     sessions[game_id] = session
-
-    # Track which Supabase user owns the first seat
-    session._owner_user_id = current_user
+    _save(game_id, session)
     return {"game_id": game_id, "mode": mode, "players": [p.name for p in session.game.players]}
 
 
-@app.post("/games/{game_id}/join")
-def join_game(game_id: str, current_user: Optional[str] = Depends(get_current_user)):
-    """Second player joins a pending game, taking over the agent's seat (Human vs Agent -> Human vs Human)."""
-    session = _get_session(game_id)
-    owner = getattr(session, '_owner_user_id', None)
-    if current_user and owner == current_user:
-        raise HTTPException(status_code=400, detail="Cannot join your own game")
-    agent_seats = [n for n, s in session.seats.items() if s.kind != HUMAN]
-    if len(agent_seats) != 1 or _is_multiplayer(session):
-        raise HTTPException(status_code=400, detail="Game has no open seat")
-    session.make_seat_human(agent_seats[0], "Guest")
-    session._guest_user_id = current_user
-    return {"game_id": game_id, "status": "joined", "player": "Guest"}
-
 @app.get("/games/{game_id}")
-def get_game(game_id: str):
-    return game_to_model(_get_session(game_id))
+def get_game(game_id: str, user: Optional[AuthUser] = Depends(optional_user)):
+    return game_to_model(_get_session(game_id, user))
+
 
 @app.post("/games/{game_id}/validate_move")
-def validate_move(game_id: str, move: MoveModel):
-    session = _get_session(game_id)
+def validate_move(game_id: str, move: MoveModel, user: Optional[AuthUser] = Depends(optional_user)):
+    session = _get_session(game_id, user)
     tiles = _tiles_from_model(move)
     equations, error = session.game.evaluate_play(tiles, move.direction or "H")
     return {
@@ -228,62 +213,80 @@ def validate_move(game_id: str, move: MoveModel):
 
 
 @app.post("/games/{game_id}/draw_equals")
-def draw_equals(game_id: str, player: Optional[str] = None,
-                current_user: Optional[str] = Depends(get_current_user)):
-    session = _get_session(game_id)
-    _assert_player_turn(session, current_user)
-    current_player = session.player(_acting_player(session, player))
-    success = session.game.draw_equals_tile(current_player)
+def draw_equals(game_id: str, player: Optional[str] = None, user: Optional[AuthUser] = Depends(optional_user)):
+    session = _get_session(game_id, user)
+    with _lock_for(game_id):
+        current_player = session.player(_acting_player(session, player))
+        success = session.game.draw_equals_tile(current_player)
+        _save(game_id, session)
     return {"success": success}
 
 
 @app.post("/games/{game_id}/swap")
 def swap_tiles(game_id: str, swap_data: SwapModel, player: Optional[str] = None,
-               current_user: Optional[str] = Depends(get_current_user)):
-    session = _get_session(game_id)
-    _assert_player_turn(session, current_user)
-    record, agent_records = _run_action(
-        session, session.swap, _acting_player(session, player), swap_data.tile_indices)
+               user: Optional[AuthUser] = Depends(optional_user)):
+    session = _get_session(game_id, user)
+    with _lock_for(game_id):
+        record, agent_records = _run_action(
+            session, session.swap, _acting_player(session, player), swap_data.tile_indices)
+        if record.ok:
+            _save(game_id, session)
     return _result(session, record, agent_records)
 
 
 @app.post("/games/{game_id}/pass")
-def pass_turn(game_id: str, player: Optional[str] = None,
-              current_user: Optional[str] = Depends(get_current_user)):
-    session = _get_session(game_id)
-    _assert_player_turn(session, current_user)
-    record, agent_records = _run_action(session, session.pass_turn, _acting_player(session, player))
+def pass_turn(game_id: str, player: Optional[str] = None, user: Optional[AuthUser] = Depends(optional_user)):
+    session = _get_session(game_id, user)
+    with _lock_for(game_id):
+        record, agent_records = _run_action(session, session.pass_turn, _acting_player(session, player))
+        if record.ok:
+            _save(game_id, session)
     return _result(session, record, agent_records)
 
 
 @app.post("/games/{game_id}/play")
 def play_move(game_id: str, move: MoveModel, player: Optional[str] = None,
-              current_user: Optional[str] = Depends(get_current_user)):
-    session = _get_session(game_id)
-    _assert_player_turn(session, current_user)
-    record, agent_records = _run_action(
-        session, session.play, _acting_player(session, player),
-        _tiles_from_model(move), move.direction or "H")
+              user: Optional[AuthUser] = Depends(optional_user)):
+    session = _get_session(game_id, user)
+    with _lock_for(game_id):
+        record, agent_records = _run_action(
+            session, session.play, _acting_player(session, player),
+            _tiles_from_model(move), move.direction or "H")
+        if record.ok:
+            _save(game_id, session)
     log_game_state(game_id, session, "MOVE_PLAYED", {"move": move.dict(), "success": record.ok})
     return _result(session, record, agent_records)
 
 
+@app.delete("/games/{game_id}")
+def delete_game(game_id: str, user: Optional[AuthUser] = Depends(optional_user)):
+    """Abandon a saved solo game (it disappears from the Continue list; no result is recorded)."""
+    session = _get_session(game_id, user)
+    if getattr(session, "owner_id", None) is None:
+        raise HTTPException(status_code=400, detail="Only saved games can be deleted")
+    persistence.save_game(game_id, "solo", session, _seat_users(session), status="abandoned")
+    sessions.pop(game_id, None)
+    return {"deleted": True}
+
+
 @app.post("/games/{game_id}/agent_step")
-def agent_step(game_id: str):
+def agent_step(game_id: str, user: Optional[AuthUser] = Depends(optional_user)):
     """Plays one turn for whichever agent is to move (watch an agent-vs-agent game unfold)."""
-    session = _get_session(game_id)
-    record = session.step_agent()
+    session = _get_session(game_id, user)
+    with _lock_for(game_id):
+        record = session.step_agent()
     if record is None:
         raise HTTPException(status_code=400, detail="It is not an agent's turn (or the game is over)")
     return {"move": record.__dict__, "game_over": session.is_over}
 
 
 @app.post("/games/{game_id}/autoplay")
-def autoplay(game_id: str):
+def autoplay(game_id: str, user: Optional[AuthUser] = Depends(optional_user)):
     """Agent-vs-agent: plays the game to completion and returns the final results."""
-    session = _get_session(game_id)
+    session = _get_session(game_id, user)
     try:
-        session.run_to_completion()
+        with _lock_for(game_id):
+            session.run_to_completion()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"results": session.game.get_final_results(), "end_reason": session.game.end_reason,

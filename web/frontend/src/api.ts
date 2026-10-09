@@ -1,10 +1,16 @@
-import type { GameState, Mode, Placed, Preview } from './types';
+import { accessToken, refreshToken } from './auth';
+import type { GameState, Mode, Placed, Preview, SavedGame, Stats } from './types';
 
 // Empty in dev (Vite proxies to the local API); set VITE_API_URL to the hosted API in production.
 const BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').replace(/\/$/, '');
 
-async function call<T>(url: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(BASE + url, init);
+async function call<T>(url: string, init: RequestInit = {}, retried = false): Promise<T> {
+    // Signed-in players identify themselves with their Supabase access token.
+    const headers = new Headers(init.headers);
+    const token = accessToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const res = await fetch(BASE + url, { ...init, headers });
+    if (res.status === 401 && token && !retried && await refreshToken()) return call<T>(url, init, true);
     if (!res.ok) {
         let detail = res.statusText;
         try { detail = (await res.json()).detail ?? detail; } catch { /* not json */ }
@@ -35,9 +41,11 @@ export interface ActionResult {
 export interface RoomJoin { code: string; seat: string; token: string }
 export type RoomPoll = { changed: false; version: number } | { changed: true; version: number; seat: string; state: GameState };
 
+// Guests prove their seat with a secret token; signed-in players also match by account,
+// so a seat token isn't needed when resuming on a new device.
 const authed = (token: string, init: RequestInit = {}): RequestInit => ({
     ...init,
-    headers: { ...(init.headers as Record<string, string> | undefined), 'X-Player-Token': token },
+    headers: { ...(init.headers as Record<string, string> | undefined), ...(token ? { 'X-Player-Token': token } : {}) },
 });
 
 export const room = {
@@ -55,6 +63,12 @@ export const room = {
         call<ActionResult>(`/rooms/${code}/pass`, authed(token, { method: 'POST' })),
 };
 
+export const me = {
+    profile: () => call<{ id: string; name: string | null }>('/me'),
+    games: () => call<{ games: SavedGame[] }>('/me/games'),
+    stats: () => call<Stats>('/me/stats'),
+};
+
 export const api = {
     create: (mode: Mode) => call<{ game_id: string }>('/games/create', json({ mode })),
     state: (id: string) => call<GameState>(`/games/${id}`),
@@ -66,5 +80,6 @@ export const api = {
         call<ActionResult>(`/games/${id}/swap?player=${encodeURIComponent(player)}`, json({ tile_indices: indices })),
     pass: (id: string, player: string) =>
         call<ActionResult>(`/games/${id}/pass?player=${encodeURIComponent(player)}`, { method: 'POST' }),
+    remove: (id: string) => call<{ deleted: boolean }>(`/games/${id}`, { method: 'DELETE' }),
     agentStep: (id: string) => call<{ game_over: boolean }>(`/games/${id}/agent_step`, { method: 'POST' }),
 };

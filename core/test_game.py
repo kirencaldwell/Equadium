@@ -197,3 +197,44 @@ def test_new_tiles_and_stacked_calculus_are_valid(equation):
 def test_second_derivative_scores_times_four():
     game = fresh_session().game
     assert game.config["tiles"]["d/dx("]["expr_multiplier"] ** 2 == 4
+
+
+# ── persistence ─────────────────────────────────────────────────────────────
+def _roundtrip(session):
+    import json
+    return GameSession.from_dict(json.loads(json.dumps(session.to_dict())), CONFIG)
+
+
+def test_session_roundtrip_mid_game_and_keeps_playing():
+    random.seed(4)
+    s = GameSession("agent_vs_agent", CONFIG)
+    for _ in range(14):
+        s.step_agent()
+    loaded = _roundtrip(s)
+    assert loaded.to_dict() == s.to_dict()
+    assert loaded.current_player.name == s.current_player.name
+    assert [p.score for p in loaded.game.players] == [p.score for p in s.game.players]
+    # the restored game is fully playable: agents move, board stays consistent
+    assert loaded.step_agent() is not None
+    assert loaded.illegal_agent_moves == 0
+
+
+def test_roundtrip_preserves_human_seats_and_history():
+    s = fresh_session("human_vs_agent", rack0=["=", "x"])
+    s.play("Human", place(s.game, ["=", "x"], (CENTER[0], CENTER[1] + 1)), "H")
+    s.advance_agents()
+    loaded = _roundtrip(s)
+    assert {n: seat.kind for n, seat in loaded.seats.items()} == {"Human": "human", "AI_Opponent": "agent"}
+    assert loaded.seats["AI_Opponent"].agent is not None and loaded.seats["Human"].agent is None
+    assert [r.player for r in loaded.history] == [r.player for r in s.history]
+    assert loaded.history[0].cells == s.history[0].cells
+
+
+def test_roundtrip_keeps_tile_values_even_if_config_changes():
+    s = fresh_session("human_vs_human")
+    data = s.to_dict()
+    retuned = copy.deepcopy(CONFIG)
+    for t in retuned["tiles"].values():
+        t["points"] += 100
+    loaded = GameSession.from_dict(data, retuned)
+    assert loaded.to_dict() == data

@@ -58,6 +58,7 @@ class Seat:
     name: str
     kind: str  # HUMAN or AGENT
     agent: Optional[AIAgent] = None
+    agent_type: Optional[str] = None   # which algorithm drives an agent seat
 
 
 @dataclass
@@ -90,12 +91,42 @@ class GameSession:
         self.seats: Dict[str, Seat] = {}
         types = iter(agent_types or [])
         for name, kind in MODES[mode]:
-            agent = None
+            agent = agent_type = None
             if kind == AGENT:
-                agent = make_agent(next(types, "search"), name, config, playbook)
-            self.seats[name] = Seat(name, kind, agent)
+                agent_type = next(types, "search")
+                agent = make_agent(agent_type, name, config, playbook)
+            self.seats[name] = Seat(name, kind, agent, agent_type)
         self.history: List[TurnRecord] = []
         self.illegal_agent_moves = 0
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+    def to_dict(self) -> dict:
+        """Everything needed to resume this game later (JSON-serialisable)."""
+        return {
+            "v": 1,
+            "mode": self.mode,
+            "seats": [{"name": s.name, "kind": s.kind, "agent_type": s.agent_type} for s in self.seats.values()],
+            "game": self.game.to_dict(),
+            "history": [vars(r).copy() for r in self.history],
+            "illegal_agent_moves": self.illegal_agent_moves,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict, config: dict = CONFIG, playbook: Optional[MathPlaybook] = None) -> "GameSession":
+        session = cls.__new__(cls)
+        session.mode = d["mode"]
+        session.config = config
+        session.playbook = playbook
+        session.game = EquadiumGame.from_dict(d["game"], config)
+        session.seats = {}
+        for sd in d["seats"]:
+            agent = make_agent(sd["agent_type"], sd["name"], config, playbook) if sd["kind"] == AGENT else None
+            session.seats[sd["name"]] = Seat(sd["name"], sd["kind"], agent, sd["agent_type"])
+        session.history = [TurnRecord(**r) for r in d["history"]]
+        session.illegal_agent_moves = d["illegal_agent_moves"]
+        return session
 
     # ------------------------------------------------------------------
     # Introspection

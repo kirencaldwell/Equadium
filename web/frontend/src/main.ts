@@ -1,7 +1,8 @@
 import './style.css';
-import { api, room } from './api';
+import { api, me, room } from './api';
+import { authAvailable, initAuth, signInWithGoogle, signOut, takePendingRoom, type User } from './auth';
 import { equation, tileHtml } from './tiles';
-import type { GameState, Mode, Placed, Preview, Tile } from './types';
+import type { GameState, Mode, Placed, Preview, SavedGame, Stats, Tile } from './types';
 
 // ─────────────────────────────────────────────
 // State
@@ -31,7 +32,10 @@ const joinLink = (code: string) => `${location.origin}${location.pathname}?room=
 const FREE_EQUALS: Tile = { symbol: '=', points: 0, expr_multiplier: 1 };
 
 const S = {
-    screen: 'home' as 'home' | 'online' | 'game',
+    screen: 'home' as 'home' | 'online' | 'game' | 'stats',
+    user: null as User | null,           // signed-in player (null = guest)
+    saved: [] as SavedGame[],            // unfinished games to resume (signed-in only)
+    stats: null as Stats | null,
     online: null as null | OnlineSeat,   // set while playing a remote game
     version: 0,                          // last server version seen (online polling)
     gameId: null as string | null,
@@ -41,7 +45,7 @@ const S = {
     rackOrder: [] as number[],
     preview: null as Preview | null,
     busy: null as null | 'submitting' | 'thinking',
-    modal: null as null | 'help' | 'swap' | 'pass' | 'handoff' | 'over',
+    modal: null as null | 'help' | 'swap' | 'pass' | 'handoff' | 'over' | 'account',
     swapPick: new Set<number>(),
     handoffFor: null as string | null,
     zoom: 1,
@@ -114,20 +118,79 @@ async function startGame(mode: Mode) {
     S.online = null;
     try {
         const { game_id } = await api.create(mode);
-        S.gameId = game_id;
-        S.game = await api.state(game_id);
+        await openSolo(game_id);
     } catch (e) {
         showToast(`Couldn't start a game: ${(e as Error).message}`);
-        return;
     }
+}
+
+/** Shows a solo game (new, or resumed from the account) from the server's copy. */
+async function openSolo(id: string) {
+    stopWatching();
+    stopPolling();
+    S.online = null;
+    S.game = await api.state(id);
+    S.gameId = id;
     S.screen = 'game';
-    S.modal = null;
+    S.modal = S.game.game_over ? 'over' : null;
     S.zoom = 1;
     S.fresh.clear();
     resetTurnState();
     render();
     centerBoard();
-    if (mode === 'agent_vs_agent') startWatching();
+    if (S.game.mode === 'agent_vs_agent' && !S.game.game_over) startWatching();
+}
+
+// ─────────────────────────────────────────────
+// Accounts: saved games and stats
+// ─────────────────────────────────────────────
+async function loadSavedGames() {
+    if (!S.user) { S.saved = []; return; }
+    try {
+        S.saved = (await me.games()).games;
+    } catch { /* offline or not signed in on the server: keep what we have */ }
+    if (S.screen === 'home' && !S.modal) render();
+}
+
+async function openStats() {
+    S.modal = null;
+    S.screen = 'stats';
+    S.stats = null;
+    render();
+    try {
+        S.stats = await me.stats();
+    } catch (e) {
+        showToast((e as Error).message);
+        S.screen = 'home';
+    }
+    render();
+}
+
+async function resumeSaved(g: SavedGame) {
+    try {
+        if (g.kind === 'room' && g.code && g.seat) await enterRoom({ code: g.code, seat: g.seat, token: g.token ?? '' });
+        else await openSolo(g.id);
+    } catch (e) {
+        showToast((e as Error).message);
+    }
+}
+
+async function deleteSaved(g: SavedGame) {
+    S.saved = S.saved.filter(x => x.id !== g.id);
+    render();
+    try { await api.remove(g.id); } catch (e) { showToast((e as Error).message); void loadSavedGames(); }
+}
+
+function onUserChange(user: User | null) {
+    const changed = user?.id !== S.user?.id;
+    S.user = user;
+    if (!changed) return;   // token refreshes also land here
+    S.saved = [];
+    S.stats = null;
+    if (user) void me.profile().catch(() => undefined);
+    void loadSavedGames();
+    if (!user && S.screen === 'stats') S.screen = 'home';
+    if (S.screen !== 'game') render();
 }
 
 async function fetchState(): Promise<GameState | null> {
@@ -147,7 +210,7 @@ async function refresh() {
     if (!S.game) return;
     markFresh(before, S.game);
     resetTurnState();
-    if (S.game.game_over) { S.modal = 'over'; if (S.online) { saveSeat(null); stopPolling(); } }
+    if (S.game.game_over) { S.modal = 'over'; if (S.online) { saveSeat(null); stopPolling(); } void loadSavedGames(); }
 }
 
 /** Remember which cells changed so the new tiles can animate in. */
@@ -261,7 +324,9 @@ function goHome() {
     S.modal = null;
     S.gameId = null;
     S.game = null;
+    S.toast = '';
     render();
+    void loadSavedGames();
 }
 
 // ─────────────────────────────────────────────
@@ -414,7 +479,7 @@ function render() {
     document.documentElement.style.setProperty('--cell-size', `${Math.round(base * S.zoom)}px`);
     const scroller = document.querySelector('.board-scroll') as HTMLElement | null;
     const pos = scroller ? { x: scroller.scrollLeft, y: scroller.scrollTop } : null;
-    app.innerHTML = S.screen === 'home' ? homeHtml() : S.screen === 'online' ? onlineHtml() : gameHtml();
+    app.innerHTML = S.screen === 'home' ? homeHtml() : S.screen === 'online' ? onlineHtml() : S.screen === 'stats' ? statsHtml() : gameHtml();
     app.insertAdjacentHTML('beforeend', modalHtml());
     lastModal = S.modal;
     app.insertAdjacentHTML('beforeend', `<div id="toast" class="toast ${S.toast ? 'show' : ''}">${S.toast}</div>`);
@@ -432,11 +497,13 @@ function homeHtml(): string {
         </button>`;
     return `
     <main class="home">
+        ${profileChip()}
         <div class="home-tiles" aria-hidden="true">
             ${[['d/dx(', 3, 2], ['x**2', 2, 1], [')', 0, 1], ['=', 0, 1], ['2', 1, 1], ['x', 1, 1]].map(([s, p, m]) => tileHtml({ symbol: s as string, points: p as number, expr_multiplier: m as number }, 'big')).join('')}
         </div>
         <h1 class="wordmark">Equadium</h1>
         <p class="tagline">A calculus game</p>
+        ${savedHtml()}
         <div class="modes">
             ${card('human_vs_agent', '🧮', 'Play the Computer', 'Solo. Out-build the bot.')}
             ${card('human_vs_human', '🤝', 'Pass &amp; Play', 'Two players, one screen.')}
@@ -452,8 +519,74 @@ function homeHtml(): string {
                 <span class="chev">›</span>
             </button>` : ''}
         </div>
+        ${authAvailable && !S.user ? '<p class="muted small center">Sign in to keep your games and stats across devices.</p>' : ''}
         <button class="link" data-act="help">How to play</button>
     </main>`;
+}
+
+const initial = (u: User) => (u.name.trim()[0] ?? '?').toUpperCase();
+const avatarHtml = (u: User) => u.avatar
+    ? `<img class="avatar" src="${u.avatar}" alt="" referrerpolicy="no-referrer">`
+    : `<span class="avatar letter">${initial(u)}</span>`;
+
+function profileChip(): string {
+    if (!authAvailable) return '';
+    const u = S.user;
+    return `<div class="home-top">${u
+        ? `<button class="chip" data-act="account" aria-label="Account">${avatarHtml(u)}<span>${u.name.split(' ')[0]}</span></button>`
+        : '<button class="chip signin" data-act="signin">Sign in</button>'}</div>`;
+}
+
+function ago(iso: string): string {
+    const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+    if (mins < 2) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.round(mins / 60);
+    return hrs < 24 ? `${hrs} h ago` : `${Math.round(hrs / 24)} d ago`;
+}
+
+function savedHtml(): string {
+    if (!S.user || !S.saved.length) return '';
+    const cards = S.saved.map((g, i) => {
+        const mine = g.players.find(p => p.name === g.seat);
+        const theirs = g.players.find(p => p.name !== g.seat);
+        const online = g.kind === 'room';
+        const title = online ? `Online · ${g.code}` : g.mode === 'human_vs_agent' ? 'vs Computer' : 'Pass & Play';
+        const opp = online ? (theirs?.label ?? 'Friend') : g.mode === 'human_vs_agent' ? 'Computer' : (theirs?.label ?? theirs?.name ?? '');
+        const state = g.status === 'waiting' ? 'Waiting for a friend to join'
+            : online ? (g.your_turn ? 'Your turn' : `${opp}'s turn`) : `${ago(g.updated_at)}`;
+        const score = g.status === 'waiting' ? '' : `<span class="score-line">${mine?.score ?? 0}<i>–</i>${theirs?.score ?? 0}</span>`;
+        return `<div class="saved-card ${g.your_turn ? 'turn' : ''}">
+            <button class="saved-main" data-act="resume-saved" data-i="${i}">
+                <span class="saved-text"><strong>${title}</strong><small>${state}</small></span>${score}
+            </button>
+            ${online ? '' : `<button class="saved-del" data-act="delete-saved" data-i="${i}" aria-label="Delete game">✕</button>`}
+        </div>`;
+    }).join('');
+    return `<section class="saved"><h3>Your games</h3>${cards}</section>`;
+}
+
+function statsHtml(): string {
+    const st = S.stats;
+    const pct = (n: number) => `${Math.round(n * 100)}%`;
+    const card = (label: string, value: string | number) => `<div class="stat"><strong>${value}</strong><span>${label}</span></div>`;
+    let body: string;
+    if (!st) body = '<p class="muted center">Loading…</p>';
+    else if (!st.games) body = '<p class="muted center">No finished games yet. Finish a game against the computer or a friend and it will show up here.</p>';
+    else body = `
+        <div class="stat-grid">
+            ${card('Games', st.games)}${card('Win rate', pct(st.win_rate))}${card('Record', `${st.wins}–${st.losses}${st.ties ? `–${st.ties}` : ''}`)}
+            ${card('Avg score', st.avg_score)}${card('Best score', st.best_score)}${card('Best play', st.best_play)}
+            ${card('Win streak', st.win_streak)}${card('vs Computer', `${st.vs_computer.wins}/${st.vs_computer.games}`)}${card('vs Friends', `${st.vs_humans.wins}/${st.vs_humans.games}`)}
+        </div>
+        <h3 class="recent-title">Recent games</h3>
+        <div class="recent">${st.recent.map(r => `
+            <div class="recent-row ${r.outcome}"><span class="pill ${r.outcome}">${r.outcome === 'win' ? 'W' : r.outcome === 'loss' ? 'L' : 'T'}</span>
+            <span>${r.opponent === 'agent' ? 'Computer' : r.mode === 'online' ? 'Online friend' : 'Friend'}</span>
+            <strong>${r.score}–${r.opp_score}</strong><small>${ago(r.finished_at)}</small></div>`).join('')}</div>`;
+    return `<main class="home stats">
+        <header class="stats-head"><button class="icon" data-act="home" aria-label="Back">‹</button><h2>Your stats</h2><span></span></header>
+        ${body}</main>`;
 }
 
 function onlineHtml(): string {
@@ -462,7 +595,7 @@ function onlineHtml(): string {
     <main class="home online">
         <h2 class="online-title">Play a friend online</h2>
         <label class="field"><span>Your name</span>
-            <input id="name" maxlength="16" autocomplete="nickname" placeholder="Player" value="${savedName().replace(/"/g, '&quot;')}"></label>
+            <input id="name" maxlength="16" autocomplete="nickname" placeholder="Player" value="${(savedName() || S.user?.name || '').replace(/"/g, '&quot;')}"></label>
         <div class="modes">
             <button class="mode-card" data-act="online-create">
                 <span class="mode-icon">✨</span>
@@ -492,7 +625,7 @@ function lobbyHtml(g: GameState): string {
             <div class="code">${code}</div>
             <button class="primary" data-act="copy-link">Copy invite link</button>
             <p class="waiting">Waiting for ${display(otherSeat())} to join<span class="dots"></span></p>
-            <p class="muted small">${g.labels?.[S.online!.seat] ? `You're playing as ${g.labels[S.online!.seat]}. ` : ''}Your game is saved on this device, so you can leave and come back.</p>
+            <p class="muted small">${g.labels?.[S.online!.seat] ? `You're playing as ${g.labels[S.online!.seat]}. ` : ''}${S.user ? 'Your game is saved to your account, so you can pick it up on any device.' : 'Your game is saved on this device, so you can leave and come back.'}</p>
         </main>
     </div>`;
 }
@@ -685,15 +818,24 @@ function modalHtml(): string {
             const me = S.online ? S.online.seat : g.mode === 'human_vs_agent' ? 'Human' : null;
             const headline = tie ? "It's a tie" : me ? (g.winners[0] === me ? 'You win!' : `${S.online ? display(g.winners[0]) : 'Computer'} wins`) : `${display(g.winners[0])} wins`;
             const why: Record<string, string> = { 'rack empty': 'Someone used every tile.', stalled: 'Nobody could play.', 'bag empty+stuck': 'The bag ran out and nobody could play.', 'turn limit': 'Turn limit reached.' };
-            body = `<h2>${headline}</h2><p class="muted">${why[g.end_reason ?? ''] ?? ''}</p>
+            body = `<h2>${headline}</h2><p class="muted">${why[g.end_reason ?? ''] ?? ''}${S.user && (S.online || g.mode === 'human_vs_agent') ? ' Added to your stats.' : ''}</p>
             <div class="final">${[...g.players].sort((a, b) => b.score - a.score).map(p => `<div class="${g.winners.includes(p.name) ? 'win' : ''}"><span>${display(p.name)}</span><strong>${p.score}</strong></div>`).join('')}</div>
             <div class="modal-actions"><button class="ghost wide" data-act="home">Menu</button>${S.online ? '<button class="primary" data-act="online">New online game</button>' : `<button class="primary" data-act="start" data-mode="${g.mode}">Play again</button>`}</div>`;
+            break;
+        }
+        case 'account': {
+            const u = S.user;
+            if (!u) break;
+            body = `<div class="account-head">${avatarHtml(u)}<div><strong>${u.name}</strong><small>${u.email}</small></div></div>
+            <p class="muted small">Your games and stats are saved to this account and follow you to any device.</p>
+            <button class="primary" data-act="stats">View my stats</button>
+            <button class="ghost wide full" data-act="signout">Sign out</button>`;
             break;
         }
         default:
             return '';
     }
-    const dismissable = S.modal === 'help' || S.modal === 'swap' || S.modal === 'pass';
+    const dismissable = S.modal === 'help' || S.modal === 'swap' || S.modal === 'pass' || S.modal === 'account';
     const enter = lastModal !== S.modal ? 'enter' : '';
     return `<div class="scrim ${S.modal} ${enter}" ${dismissable ? 'data-act="close-scrim"' : ''}><div class="modal ${S.modal} ${enter}" role="dialog">${body}</div></div>`;
 }
@@ -759,6 +901,12 @@ app.addEventListener('click', (e) => {
                 void navigator.clipboard?.writeText(joinLink(S.online!.code))
                     .then(() => showToast('Invite link copied'), () => showToast(`Share this code: ${S.online!.code}`));
                 break;
+            case 'signin': void signInWithGoogle().catch(err => showToast((err as Error).message)); break;
+            case 'signout': S.modal = null; void signOut().then(() => { goHome(); }); break;
+            case 'account': S.modal = 'account'; render(); break;
+            case 'stats': void openStats(); break;
+            case 'resume-saved': { const g = S.saved[Number(actEl.dataset.i)]; if (g) void resumeSaved(g); break; }
+            case 'delete-saved': { const g = S.saved[Number(actEl.dataset.i)]; if (g) void deleteSaved(g); break; }
             case 'help': S.modal = 'help'; render(); break;
             case 'close': case 'close-scrim': S.modal = S.game?.game_over ? 'over' : null; render(); break;
             case 'home': goHome(); break;
@@ -841,12 +989,19 @@ document.addEventListener('keydown', (e) => {
 
 render();
 
-// Opened via an invite link (?room=CODE): resume if we already sit in that game, otherwise offer to join.
-{
+// Boot: restore any saved sign-in first, then handle an invite link (?room=CODE): resume if we
+// already sit in that game, otherwise offer to join.
+void (async () => {
+    S.user = await initAuth(onUserChange);
+    if (S.user) { void me.profile().catch(() => undefined); void loadSavedGames(); }
+    const pending = takePendingRoom();   // an invite link survives the Google sign-in redirect
+    if (pending && !new URLSearchParams(location.search).get('room')) history.replaceState(null, '', `${location.pathname}?room=${pending}`);
     const code = new URLSearchParams(location.search).get('room')?.toUpperCase();
     if (code) {
         const saved = loadSaved();
-        if (saved && saved.code === code) void enterRoom(saved);
+        if (saved && saved.code === code) await enterRoom(saved);
         else { S.screen = 'online'; render(); }
+    } else {
+        render();
     }
-}
+})();
