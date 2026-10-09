@@ -15,7 +15,7 @@ export interface Player {
 
 export interface LastMove {
     player: string;
-    action: 'play' | 'swap' | 'pass';
+    action: 'play' | 'swap' | 'pass' | 'forfeit';
     ok: boolean;
     score_delta: number;
     error: string | null;
@@ -34,6 +34,8 @@ export interface GameState {
     seats: Record<string, 'human' | 'agent'>;
     game_over: boolean;
     end_reason: string | null;
+    /** seat name of the player who gave up, if the game ended by forfeit */
+    forfeited_by: string | null;
     winners: string[];
     turns_played: number;
     bag_count: number;

@@ -81,6 +81,10 @@ class EquadiumGame:
         # Human-readable reason the most recent move was rejected (or None)
         self.last_error: Optional[str] = None
 
+        # Name of the player who gave up, if anyone did. A forfeit ends the game at once and the
+        # other player wins no matter what the scores say.
+        self.forfeited_by: Optional[str] = None
+
     @property
     def is_game_over(self) -> bool:
         """
@@ -96,6 +100,8 @@ class EquadiumGame:
     @property
     def end_reason(self) -> Optional[str]:
         """Why the game is over, or None if it is still in progress."""
+        if self.forfeited_by is not None:
+            return "forfeit"
         if any(len(p.rack) == 0 for p in self.players):
             return "rack empty"
         if not self.tile_bag and self.consecutive_non_plays >= len(self.players):
@@ -110,7 +116,10 @@ class EquadiumGame:
 
     @property
     def winners(self) -> List[str]:
-        """Names of the highest scorer(s); more than one means a tie."""
+        """Names of the winner(s); more than one means a tie. After a forfeit that is everyone else,
+        whatever the scores were."""
+        if self.forfeited_by is not None:
+            return [p.name for p in self.players if p.name != self.forfeited_by]
         top = max(p.score for p in self.players)
         return [p.name for p in self.players if p.score == top]
 
@@ -225,6 +234,7 @@ class EquadiumGame:
             "turns_played": self.turns_played,
             "consecutive_non_plays": self.consecutive_non_plays,
             "stats": {name: vars(st).copy() for name, st in self.stats.items()},
+            "forfeited_by": self.forfeited_by,
         }
 
     @classmethod
@@ -244,6 +254,7 @@ class EquadiumGame:
         game.turns_played = d["turns_played"]
         game.consecutive_non_plays = d["consecutive_non_plays"]
         game.stats = {name: PlayerStats(**st) for name, st in d["stats"].items()}
+        game.forfeited_by = d.get("forfeited_by")      # absent in games saved before forfeits existed
         return game
 
     def display_scoreboard(self):
@@ -503,6 +514,16 @@ class EquadiumGame:
                 "turns_played": self.turns_played,
             }
         return results
+
+    def forfeit(self, player) -> bool:
+        """The player gives up. Allowed at any time (it need not be their turn) until the game is over."""
+        if self.is_game_over:
+            self.last_error = "The game is already over"
+            return False
+        self.forfeited_by = player.name
+        if self.verbose:
+            print(f"🏳️  {player.name} forfeited the game.")
+        return True
 
     def swap_tiles(self, player, tiles_to_swap):
         """Returns chosen tiles to the bag and draws replacements."""

@@ -67,6 +67,8 @@ export const room = {
         call<ActionResult>(`/rooms/${code}/swap`, authed(token, json({ tile_indices: indices }))),
     pass: (code: string, token: string) =>
         call<ActionResult>(`/rooms/${code}/pass`, authed(token, { method: 'POST' })),
+    forfeit: (code: string, token: string) =>
+        call<ActionResult>(`/rooms/${code}/forfeit`, authed(token, { method: 'POST' })),
 };
 
 export const me = {
@@ -86,6 +88,8 @@ export const api = {
         call<ActionResult>(`/games/${id}/swap?player=${encodeURIComponent(player)}`, json({ tile_indices: indices })),
     pass: (id: string, player: string) =>
         call<ActionResult>(`/games/${id}/pass?player=${encodeURIComponent(player)}`, { method: 'POST' }),
+    forfeit: (id: string, player: string) =>
+        call<ActionResult>(`/games/${id}/forfeit?player=${encodeURIComponent(player)}`, { method: 'POST' }),
     remove: (id: string) => call<{ deleted: boolean }>(`/games/${id}`, { method: 'DELETE' }),
     agentStep: (id: string) => call<{ game_over: boolean }>(`/games/${id}/agent_step`, { method: 'POST' }),
 };

@@ -265,6 +265,17 @@ def pass_turn(game_id: str, player: Optional[str] = None, user: Optional[AuthUse
     return _result(session, record, agent_records)
 
 
+@app.post("/games/{game_id}/forfeit")
+def forfeit_game(game_id: str, player: Optional[str] = None, user: Optional[AuthUser] = Depends(optional_user)):
+    """Give up: a loss for the forfeiter and a win for the other player. Allowed on either side's turn."""
+    session = _get_session(game_id, user)
+    with _lock_for(game_id):
+        record, agent_records = _run_action(session, session.forfeit, _acting_player(session, player))
+        if record.ok:
+            _save(game_id, session)
+    return _result(session, record, agent_records)
+
+
 @app.post("/games/{game_id}/play")
 def play_move(game_id: str, move: MoveModel, player: Optional[str] = None,
               user: Optional[AuthUser] = Depends(optional_user)):

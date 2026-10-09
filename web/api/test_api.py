@@ -119,3 +119,35 @@ def test_cannot_autoplay_with_a_human_seat():
 
 def test_unknown_game_404():
     assert client.get("/games/does-not-exist").status_code == 404
+
+
+# ── forfeit ─────────────────────────────────────────────────────────────────
+def test_forfeiting_a_game_against_the_computer_is_a_loss():
+    gid = create("human_vs_agent")
+    r = client.post(f"/games/{gid}/forfeit").json()
+    assert r["status"] == "success" and r["game_over"] is True and r["agent_moves"] == []
+    state = client.get(f"/games/{gid}").json()
+    assert state["game_over"] and state["end_reason"] == "forfeit"
+    assert state["forfeited_by"] == "Human" and state["winners"] == ["AI_Opponent"]
+    assert state["last_move"]["action"] == "forfeit"
+
+
+def test_no_moves_or_second_forfeit_after_forfeiting():
+    gid = create("human_vs_agent")
+    client.post(f"/games/{gid}/forfeit")
+    assert client.post(f"/games/{gid}/forfeit").status_code == 400
+    assert client.post(f"/games/{gid}/pass").status_code == 400
+    rig_rack(gid, 0, ["=", "x"])
+    assert client.post(f"/games/{gid}/play", json=equals_x_play()).status_code == 400
+
+
+def test_pass_and_play_forfeit_names_who_gave_up():
+    gid = create("human_vs_human")
+    client.post(f"/games/{gid}/forfeit", params={"player": "Player2"})       # not their turn, still allowed
+    state = client.get(f"/games/{gid}").json()
+    assert state["forfeited_by"] == "Player2" and state["winners"] == ["Player1"]
+
+
+def test_bots_cannot_forfeit():
+    gid = create("agent_vs_agent")
+    assert client.post(f"/games/{gid}/forfeit").status_code == 400

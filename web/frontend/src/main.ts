@@ -46,7 +46,7 @@ const S = {
     rackOrder: [] as number[],
     preview: null as Preview | null,
     busy: null as null | 'submitting' | 'thinking',
-    modal: null as null | 'help' | 'swap' | 'pass' | 'handoff' | 'over' | 'account',
+    modal: null as null | 'help' | 'swap' | 'pass' | 'forfeit' | 'handoff' | 'over' | 'account',
     swapPick: new Set<number>(),
     handoffFor: null as string | null,
     zoom: 1,
@@ -114,7 +114,7 @@ function resetTurnState() {
 // Navigation: every screen is a history entry, so the browser's Back/Forward buttons (and a phone's back
 // gesture) move between screens instead of leaving the site. See nav.ts for the URL scheme.
 // ─────────────────────────────────────────────
-const DISMISSABLE = new Set(['help', 'swap', 'pass', 'account']);
+const DISMISSABLE = new Set(['help', 'swap', 'pass', 'forfeit', 'account']);
 let modalEntry = false;   // the top history entry is a pop-up we pushed, so Back should just close it
 let swallowPop = 0;       // popstate events we caused ourselves (closing a pop-up); ignored by the handler
 
@@ -461,11 +461,12 @@ function readName(): string {
 // ─────────────────────────────────────────────
 // Turn actions
 // ─────────────────────────────────────────────
-async function submitAction(run: () => Promise<{ status: string; error: string | null; score_delta: number; agent_moves: { player: string; action: string; score_delta: number; tiles: string[] | null }[] }>, okMessage: (r: Awaited<ReturnType<typeof run>>) => string) {
-    if (!myTurn()) return;
+async function submitAction(run: () => Promise<{ status: string; error: string | null; score_delta: number; agent_moves: { player: string; action: string; score_delta: number; tiles: string[] | null }[] }>, okMessage: (r: Awaited<ReturnType<typeof run>>) => string, anyTurn = false) {
+    // Moves need it to be your turn; giving up does not.
+    if (anyTurn ? !(S.game && !S.game.game_over && !S.busy) : !myTurn()) return;
     const me = actingPlayer()!;
     const hotSeat = S.game!.mode === 'human_vs_human' && !S.online;
-    S.busy = S.game!.mode === 'human_vs_agent' ? 'thinking' : 'submitting';
+    S.busy = S.game!.mode === 'human_vs_agent' && !anyTurn ? 'thinking' : 'submitting';
     render();
     try {
         const res = await run();
@@ -496,6 +497,7 @@ function describeMove(player: string, action: string, tiles: number, score: numb
     const who = display(player);
     if (action === 'play') return `${who} played ${tiles} tile${tiles === 1 ? '' : 's'} for +${score}`;
     if (action === 'swap') return `${who} swapped tiles`;
+    if (action === 'forfeit') return `${who} forfeited`;
     return `${who} passed`;
 }
 
@@ -509,6 +511,15 @@ const swap = () => submitAction(
     () => S.online ? room.swap(S.online.code, S.online.token, [...S.swapPick])
                    : api.swap(S.gameId!, actingPlayer()!, [...S.swapPick]),
     () => 'Tiles swapped',
+);
+
+/** Whether the signed-in/seated human can give up this game right now. */
+const canForfeit = (g: GameState) => !g.game_over && g.mode !== 'agent_vs_agent' && (!S.online || g.joined);
+
+const forfeit = () => submitAction(
+    () => S.online ? room.forfeit(S.online.code, S.online.token) : api.forfeit(S.gameId!, actingPlayer()!),
+    () => 'You forfeited the game',
+    true,
 );
 
 const pass = () => submitAction(
@@ -894,7 +905,10 @@ function gameHtml(): string {
         <header class="bar">
             <button class="icon" data-act="home" aria-label="Menu">‹</button>
             <span class="wordmark small">Equadium</span>
-            <button class="icon" data-act="help" aria-label="How to play">?</button>
+            <span class="bar-right">
+                ${canForfeit(g) ? '<button class="icon flag" data-act="forfeit" aria-label="Forfeit game" title="Forfeit">⚑</button>' : ''}
+                <button class="icon" data-act="help" aria-label="How to play">?</button>
+            </span>
         </header>
         ${scoreboardHtml(g)}
         <div class="status ${S.busy === 'thinking' ? 'thinking' : ''}" id="status">${statusText(g)}</div>
@@ -933,6 +947,13 @@ function modalHtml(): string {
             <button class="primary" data-act="swap-confirm" ${S.swapPick.size ? '' : 'disabled'}>Swap ${S.swapPick.size || ''}</button></div>`;
             break;
         }
+        case 'forfeit': {
+            const opp = g ? (S.online ? display(otherSeat()) : g.mode === 'human_vs_agent' ? 'the Computer' : display(g.players.find(p => p.name !== actingPlayer())?.name ?? 'your opponent')) : 'your opponent';
+            const who = g && g.mode === 'human_vs_human' && !S.online ? `${display(actingPlayer() ?? '')} gives up. ` : '';
+            body = `<h2>Forfeit this game?</h2><p class="muted">${who}It counts as a loss for ${g && g.mode === 'human_vs_human' && !S.online ? display(actingPlayer() ?? '') : 'you'} and a win for ${opp}, whatever the score.</p>
+            <div class="modal-actions"><button class="ghost wide" data-act="close">Keep playing</button><button class="primary danger" data-act="forfeit-confirm">Forfeit</button></div>`;
+            break;
+        }
         case 'pass':
             body = `<h2>Skip your turn?</h2><p class="muted">You keep your tiles and score nothing.</p>
             <div class="modal-actions"><button class="ghost wide" data-act="close">Cancel</button><button class="primary" data-act="pass-confirm">Pass</button></div>`;
@@ -945,8 +966,10 @@ function modalHtml(): string {
             if (!g) break;
             const tie = g.winners.length > 1;
             const me = S.online ? S.online.seat : g.mode === 'human_vs_agent' ? 'Human' : null;
-            const headline = tie ? "It's a tie" : me ? (g.winners[0] === me ? 'You win!' : `${S.online ? display(g.winners[0]) : 'Computer'} wins`) : `${display(g.winners[0])} wins`;
-            const why: Record<string, string> = { 'rack empty': 'Someone used every tile.', stalled: 'Nobody could play.', 'bag empty+stuck': 'The bag ran out and nobody could play.', 'turn limit': 'Turn limit reached.' };
+            const gaveUp = g.end_reason === 'forfeit' ? g.forfeited_by : null;
+            const headline = gaveUp ? (me ? (gaveUp === me ? 'You forfeited' : `${display(gaveUp)} forfeited. You win!`) : `${display(gaveUp)} forfeited`)
+                : tie ? "It's a tie" : me ? (g.winners[0] === me ? 'You win!' : `${S.online ? display(g.winners[0]) : 'Computer'} wins`) : `${display(g.winners[0])} wins`;
+            const why: Record<string, string> = { 'rack empty': 'Someone used every tile.', stalled: 'Nobody could play.', 'bag empty+stuck': 'The bag ran out and nobody could play.', 'turn limit': 'Turn limit reached.', forfeit: me && gaveUp === me ? 'That counts as a loss.' : 'The game ended by forfeit.' };
             body = `<h2>${headline}</h2><p class="muted">${why[g.end_reason ?? ''] ?? ''}${S.user && (S.online || g.mode === 'human_vs_agent') ? ' Added to your stats.' : ''}</p>
             <div class="final">${[...g.players].sort((a, b) => b.score - a.score).map(p => `<div class="${g.winners.includes(p.name) ? 'win' : ''}"><span>${display(p.name)}</span><strong>${p.score}</strong></div>`).join('')}</div>
             <div class="modal-actions"><button class="ghost wide" data-act="home">Menu</button>${S.online ? '<button class="primary" data-act="online">New online game</button>' : `<button class="primary" data-act="start" data-mode="${g.mode}">Play again</button>`}</div>`;
@@ -964,7 +987,7 @@ function modalHtml(): string {
         default:
             return '';
     }
-    const dismissable = S.modal === 'help' || S.modal === 'swap' || S.modal === 'pass' || S.modal === 'account';
+    const dismissable = S.modal === 'help' || S.modal === 'swap' || S.modal === 'pass' || S.modal === 'forfeit' || S.modal === 'account';
     const enter = lastModal !== S.modal ? 'enter' : '';
     return `<div class="scrim ${S.modal} ${enter}" ${dismissable ? 'data-act="close-scrim"' : ''}><div class="modal ${S.modal} ${enter}" role="dialog">${body}</div></div>`;
 }
@@ -1064,6 +1087,8 @@ app.addEventListener('click', (e) => {
             }
             case 'swap-confirm': closeModal(); void swap(); break;
             case 'pass': openModal('pass'); break;
+            case 'forfeit': openModal('forfeit'); break;
+            case 'forfeit-confirm': closeModal(); void forfeit(); break;
             case 'pass-confirm': closeModal(); void pass(); break;
             case 'zoom-in': setZoom(S.zoom + 0.15); break;
             case 'zoom-out': setZoom(S.zoom - 0.15); break;

@@ -281,3 +281,9 @@ button:disabled { cursor: default; }
 .pill.win { background: var(--good); color: #fff; }
 .pill.loss { background: var(--t-calc); color: #1a1a1a; }
 .pill.tie { background: var(--t-num); color: #1a1a1a; }
+
+/* ───────────── Forfeit ───────────── */
+.bar-right { display: flex; align-items: center; gap: 2px; }
+.icon.flag { font-size: 20px; color: var(--muted); }
+.icon.flag:hover { color: var(--t-calc-edge); }
+.primary.danger { background: var(--t-calc); color: #1a1a1a; box-shadow: 0 3px 0 var(--t-calc-edge); }

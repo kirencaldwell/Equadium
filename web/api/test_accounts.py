@@ -569,3 +569,53 @@ def test_server_errors_still_carry_cors_headers(monkeypatch):
 def test_allowed_origins_tolerate_trailing_slashes_and_spaces():
     assert main._cors_origins("https://a.vercel.app/, http://localhost:3000 ,") == ["https://a.vercel.app", "http://localhost:3000"]
     assert main._cors_origins("") == ["*"] and main._cors_origins(None) == ["*"]
+
+
+# ── forfeit: results, stats, saved games, online rooms ──────────────────────
+def test_forfeit_is_recorded_as_a_loss_even_when_ahead():
+    gid = new_game(H())
+    main.sessions[gid].game.players[0].score = 80                     # you lead the computer...
+    assert client.post(f"/games/{gid}/forfeit", headers=H()).json()["game_over"] is True
+    stats = client.get("/me/stats", headers=H()).json()               # ...but giving up is still a loss
+    assert (stats["games"], stats["wins"], stats["losses"], stats["forfeits"]) == (1, 0, 1, 1)
+    assert stats["recent"][0]["outcome"] == "loss" and stats["recent"][0]["score"] == 80
+    assert client.get("/me/games", headers=H()).json()["games"] == []  # finished: off the Continue list
+
+
+def test_forfeit_survives_a_restart():
+    gid = new_game(H())
+    client.post(f"/games/{gid}/forfeit", headers=H())
+    restart()
+    state = client.get(f"/games/{gid}", headers=H()).json()
+    assert state["game_over"] and state["forfeited_by"] == "Human" and state["winners"] == ["AI_Opponent"]
+    assert client.get("/me/stats", headers=H()).json()["games"] == 1   # still counted exactly once
+
+
+def test_pass_and_play_forfeit_does_not_touch_stats():
+    gid = new_game(H(), mode="human_vs_human")
+    client.post(f"/games/{gid}/forfeit", params={"player": "Player1"}, headers=H())
+    assert client.get("/me/stats", headers=H()).json()["games"] == 0
+
+
+def test_online_forfeit_gives_the_win_to_the_opponent_on_either_turn():
+    host, guest = make_room()
+    room = rooms._rooms[host["code"]]
+    waiting = next(seat for seat in ("Player1", "Player2") if seat != room.session.current_player.name)
+    who = {host["seat"]: H(), guest["seat"]: H(BOB, "Bob")}
+    r = client.post(f"/rooms/{host['code']}/forfeit", headers=who[waiting]).json()   # forfeits while it is NOT their turn
+    assert r["status"] == "success" and r["game_over"] is True
+    other = next(s for s in who if s != waiting)
+    seen = client.get(f"/rooms/{host['code']}", headers=who[other]).json()["state"]   # the opponent's next poll
+    assert seen["game_over"] and seen["forfeited_by"] == waiting and seen["winners"] == [other]
+    ids = {host["seat"]: ALICE, guest["seat"]: BOB}
+    loser, winner = client.get("/me/stats", headers=who[waiting]).json(), client.get("/me/stats", headers=who[other]).json()
+    assert (loser["losses"], loser["forfeits"]) == (1, 1) and (winner["wins"], winner["forfeits"]) == (1, 0)
+    assert ids[waiting] != ids[other]
+
+
+def test_online_forfeit_needs_a_seat_and_an_opponent():
+    host, _ = make_room()
+    assert client.post(f"/rooms/{host['code']}/forfeit").status_code == 403                      # a stranger can't
+    assert client.post(f"/rooms/{host['code']}/forfeit", headers=H("someone-else", "Eve")).status_code == 403
+    lonely = client.post("/rooms", json={}).json()                                                # nobody joined yet
+    assert client.post(f"/rooms/{lonely['code']}/forfeit", headers={"X-Player-Token": lonely["token"]}).status_code == 409
