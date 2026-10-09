@@ -208,7 +208,7 @@ def create_game(body: Optional[CreateGameModel] = None, user: Optional[AuthUser]
     if mode not in MODES:
         raise HTTPException(status_code=400, detail=f"Unknown mode '{mode}'. Choose from: {', '.join(MODES)}")
     game_id = secrets.token_urlsafe(9)
-    session = GameSession(mode, CONFIG, verbose=True)
+    session = GameSession(mode, CONFIG)
     session.owner_id = user.id if user and mode != "agent_vs_agent" else None
     sessions[game_id] = session
     _save(game_id, session)

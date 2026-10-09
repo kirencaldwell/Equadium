@@ -23,16 +23,23 @@ How a turn works
 """
 
 import cmath
+import hashlib
 import itertools
+import json
+import logging
 import math
+import os
 import random
 import re
+import time
 from collections import Counter, defaultdict
 from typing import Dict, List, Optional, Tuple
 
 import sympy as sp
 
 from core.game_entities import Move, make_tile
+
+logger = logging.getLogger("equadium.search_agent")
 
 # Sample points (x, a, b, k) used to fingerprint expressions. Fixed so results
 # are deterministic, and chosen to avoid 0/1 where identities degenerate.
@@ -95,6 +102,90 @@ def _key(vec) -> Optional[tuple]:
 _CMATH_NAMESPACE = [{"exp": cmath.exp, "log": cmath.log, "sin": cmath.sin, "cos": cmath.cos,
                      "sqrt": cmath.sqrt}, "math"]
 _CALCULUS_CACHE: Dict[tuple, Optional[Tuple[float, ...]]] = {}
+# Which tile pairs the engine does NOT read as a plain product ("2","3" -> 23). Also pure, so shared.
+_PAIR_CACHE: Dict[tuple, bool] = {}
+
+# Both caches are pure functions of the tile symbols and the math engine, but computing them with SymPy is
+# slow (seconds per game on a fast core, minutes on a small server), so they are precomputed into this file
+# by `python -m core.precompute_search_cache`. The file records the SymPy version and a hash of the rules
+# engine it was built with and is ignored (falling back to computing lazily) if either has changed.
+CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_cache.json")
+_SEP = "\x1f"
+
+
+def _engine_hash() -> str:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "math_engine.py"), "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()[:16]
+
+
+def cache_header() -> dict:
+    return {"schema": 1, "engine": _engine_hash(), "sympy": sp.__version__, "samples": [list(p) for p in SAMPLES]}
+
+
+def load_cache_file(path: str = CACHE_FILE) -> bool:
+    """Seeds the shared caches from the precomputed file. Returns False if it is missing or out of date."""
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        if data.get("header") != cache_header():
+            logger.warning("search_cache.json is out of date (rules engine, SymPy or samples changed): "
+                           "ignoring it. Regenerate with `python -m core.precompute_search_cache`.")
+            return False
+        for key, bad in data["pairs"].items():
+            kind, *toks = key.split(_SEP)
+            _PAIR_CACHE[(kind, *toks)] = bad
+        for key, vec in data["calculus"].items():
+            kind, *toks = key.split(_SEP)
+            _CALCULUS_CACHE[(kind, tuple(toks))] = tuple(vec) if vec is not None else None
+        return True
+    except FileNotFoundError:
+        return False
+    except Exception:
+        logger.exception("Could not read %s; computing lazily instead", path)
+        return False
+
+
+def pair_is_bad(engine, kind: str, a: Optional[str], b: Optional[str] = None) -> bool:
+    """
+    kind "p": do tiles a then b fail to mean a*b?   kind "e<": a followed by exp(x)?   kind "e>": exp(x) followed by b?
+    Cached process-wide; `engine` is only used on a miss.
+    """
+    key = (kind, a) if kind == "e<" else (kind, b) if kind == "e>" else (kind, a, b)
+    if key in _PAIR_CACHE:
+        return _PAIR_CACHE[key]
+    try:
+        if kind == "p":
+            bad = sp.simplify(engine._parse_expression(a + b)
+                              - engine._parse_expression(a) * engine._parse_expression(b)) != 0
+        elif kind == "e<":
+            bad = sp.simplify(engine._parse_expression(a + "exp(x)")
+                              - engine._parse_expression(a) * engine._parse_expression("exp(x)")) != 0
+        else:
+            bad = sp.simplify(engine._parse_expression("exp(x)" + b)
+                              - engine._parse_expression("exp(x)") * engine._parse_expression(b)) != 0
+    except Exception:
+        bad = True
+    _PAIR_CACHE[key] = bad
+    return bad
+
+
+def compute_calculus_vec(engine, kind: str, inner_tokens: tuple) -> Optional[Tuple[float, ...]]:
+    """Value (at the sample points) of d/dx or the integral of the expression the tokens spell, or None."""
+    try:
+        x, a, b, k = sp.symbols("x a b k")
+        expr = engine._parse_expression("".join(inner_tokens))
+        res = sp.diff(expr, x) if kind == "d/dx" else sp.integrate(expr, x)
+        if not res.has(sp.Integral, sp.Piecewise, sp.zoo, sp.nan):
+            f = sp.lambdify((x, a, b, k), res, _CMATH_NAMESPACE)
+            vals = [complex(f(*pt)) for pt in SAMPLES]
+            if all((abs(v.imag) < 1e-9 or res.has(sp.log)) and math.isfinite(v.real) for v in vals):
+                return tuple(v.real for v in vals)
+    except Exception:
+        pass
+    return None
+
+
+load_cache_file()
 
 
 class Candidate:
@@ -108,13 +199,16 @@ class Candidate:
 
 class SearchAgent:
     def __init__(self, name, config, max_len: int = 5, max_inner: int = 2,
-                 max_verify: int = 30, node_budget: int = 150_000,
+                 max_verify: int = 30, node_budget: int = 150_000, time_budget: Optional[float] = None,
                  max_candidates: int = 4000, verbose: bool = False):
         """
         max_len    : longest rack expression (in tiles) the pool will contain
         max_inner  : longest expression combined with an anchor (anchor + A)
         max_verify : most candidates sent to the (slow) SymPy validator per turn
         node_budget: search-work cap per turn; the pool deepens only while it fits
+        time_budget: soft wall-clock cap per turn in seconds (default 6, or EQUADIUM_AGENT_TIME_BUDGET). Once it
+                     is spent the agent stops deepening, skips uncached SymPy work and stops verifying more
+                     candidates: a slow host gets slightly weaker moves instead of long waits.
         max_candidates: stop collecting once this many plays are found (best are verified)
         """
         self.name = name
@@ -123,6 +217,8 @@ class SearchAgent:
         self.max_inner = max_inner
         self.max_verify = max_verify
         self.node_budget = node_budget
+        self.time_budget = time_budget if time_budget is not None else float(os.environ.get("EQUADIUM_AGENT_TIME_BUDGET", "6"))
+        self._deadline = float("inf")
         self.max_candidates = max_candidates
         self.verbose = verbose
 
@@ -130,7 +226,7 @@ class SearchAgent:
         self.points = {s: d["points"] for s, d in config["tiles"].items()}
         self.points["="] = config["equals_tile"]["points"]
         self.mult = {s: d.get("expr_multiplier", 1) for s, d in config["tiles"].items()}
-        self.bad_pairs = None  # computed lazily from the engine, see _adjacency_blacklist
+        self.bad_pairs = None  # per-agent view of the shared pair cache, see _adjacency_blacklist
 
         # Per-turn counters (inspected by the stress test)
         self.stats = Counter()
@@ -176,27 +272,15 @@ class SearchAgent:
         if self.bad_pairs is not None:
             return self.bad_pairs
         engine = game.math
-        single = {s: engine._parse_expression(s) for s in self.value_tiles}
         bad = set()
         for a, b in itertools.product(self.value_tiles, repeat=2):
-            try:
-                got = engine._parse_expression(a + b)
-                if sp.simplify(got - single[a] * single[b]) != 0:
-                    bad.add((a, b))
-            except Exception:
+            if pair_is_bad(engine, "p", a, b):
                 bad.add((a, b))
         # exp( ... ) behaves like a value tile at its boundaries
-        exp_x = engine._parse_expression("exp(x)")
         for s_ in self.value_tiles:
-            try:
-                if sp.simplify(engine._parse_expression(s_ + "exp(x)") - single[s_] * exp_x) != 0:
-                    bad.add((s_, "exp("))
-            except Exception:
+            if pair_is_bad(engine, "e<", s_):
                 bad.add((s_, "exp("))
-            try:
-                if sp.simplify(engine._parse_expression("exp(x)" + s_) - exp_x * single[s_]) != 0:
-                    bad.add((")", s_))
-            except Exception:
+            if pair_is_bad(engine, "e>", None, s_):
                 bad.add((")", s_))
         self.bad_pairs = bad
         return bad
@@ -215,6 +299,9 @@ class SearchAgent:
             growth = nodes / last_nodes if last_nodes else 8
             prev_nodes, last_nodes = last_nodes, nodes
             if nodes * max(growth, 2) > self.node_budget:
+                break
+            if depth >= 2 and self._over_budget(0.4):     # a slow host: stop deepening after 40% of the budget
+                self.stats["budget_hits"] += 1
                 break
         return best
 
@@ -294,20 +381,15 @@ class SearchAgent:
         cache_key = (kind, inner_tokens)
         if cache_key in _CALCULUS_CACHE:
             return _CALCULUS_CACHE[cache_key]
-        result = None
-        try:
-            x, a, b, k = sp.symbols("x a b k")
-            expr = game.math._parse_expression("".join(inner_tokens))
-            res = sp.diff(expr, x) if kind == "d/dx" else sp.integrate(expr, x)
-            if not res.has(sp.Integral, sp.Piecewise, sp.zoo, sp.nan):
-                f = sp.lambdify((x, a, b, k), res, _CMATH_NAMESPACE)
-                vals = [complex(f(*pt)) for pt in SAMPLES]
-                if all((abs(v.imag) < 1e-9 or res.has(sp.log)) and math.isfinite(v.real) for v in vals):
-                    result = tuple(v.real for v in vals)
-        except Exception:
-            result = None
+        if self._over_budget():
+            self.stats["budget_skips"] += 1
+            return None            # not cached: a later, less rushed turn can still compute it
+        result = compute_calculus_vec(game.math, kind, inner_tokens)
         _CALCULUS_CACHE[cache_key] = result
         return result
+
+    def _over_budget(self, fraction: float = 1.0) -> bool:
+        return time.monotonic() > self._deadline - self.time_budget * (1.0 - fraction)
 
     # ------------------------------------------------------------------
     # Step 2: candidate sides built around an anchor
@@ -376,6 +458,7 @@ class SearchAgent:
         return pts * mult
 
     def find_best_move(self, game) -> Optional[Move]:
+        self._deadline = time.monotonic() + self.time_budget
         player = game.players[game.current_turn_index]
         board = game.board
         bad_pairs = self._adjacency_blacklist(game)
@@ -423,11 +506,16 @@ class SearchAgent:
         candidates.sort(key=lambda cand: cand[1].score, reverse=True)
         self.stats["candidates"] += len(candidates)
 
+        self.stats["verified_this_turn"] = 0
         for (r, c, direction), cand in candidates[: self.max_verify]:
             move = self._to_move(game, player, (r, c, direction), cand)
             if move is None:
                 continue
+            if self.stats["verified_this_turn"] >= 3 and self._over_budget():
+                self.stats["budget_hits"] += 1
+                break
             self.stats["verified"] += 1
+            self.stats["verified_this_turn"] += 1
             _, error = game.evaluate_play(move.tiles_to_play, direction)
             if error is None:
                 return move

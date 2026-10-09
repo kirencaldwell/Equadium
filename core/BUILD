@@ -38,6 +38,7 @@ py_library(
 py_library(
     name = "search_agent",
     srcs = ["search_agent.py"],
+    data = ["search_cache.json"],
     deps = [
         ":game_entities",
         requirement("sympy"),
@@ -74,6 +75,17 @@ py_binary(
         ":game_manager",
         ":game_entities",
         ":search_agent",
+        requirement("sympy"),
+    ],
+)
+
+py_binary(
+    name = "precompute_search_cache",
+    srcs = ["precompute_search_cache.py"],
+    deps = [
+        ":search_agent",
+        ":math_engine",
+        ":game_config",
         requirement("sympy"),
     ],
 )
