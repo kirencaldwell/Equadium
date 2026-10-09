@@ -9,7 +9,13 @@ async function call<T>(url: string, init: RequestInit = {}, retried = false): Pr
     const headers = new Headers(init.headers);
     const token = await accessToken();
     if (token) headers.set('Authorization', `Bearer ${token}`);
-    const res = await fetch(BASE + url, { ...init, headers });
+    let res: Response;
+    try {
+        res = await fetch(BASE + url, { ...init, headers });
+    } catch {
+        // fetch only throws when no response arrived at all: server asleep or down, offline, or blocked.
+        throw new Error("Couldn't reach the game server. If it has been idle it may be waking up: wait a minute and try again.");
+    }
     if (res.status === 401 && token && !retried && await refreshToken()) return call<T>(url, init, true);
     if (!res.ok) {
         let detail = res.statusText;
@@ -64,7 +70,7 @@ export const room = {
 };
 
 export const me = {
-    profile: () => call<{ id: string; name: string | null }>('/me'),
+    profile: () => call<{ id: string; name: string | null; saving: string }>('/me'),
     games: () => call<{ games: SavedGame[] }>('/me/games'),
     stats: () => call<Stats>('/me/stats'),
 };

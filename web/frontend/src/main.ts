@@ -181,13 +181,21 @@ async function deleteSaved(g: SavedGame) {
     try { await api.remove(g.id); } catch (e) { showToast((e as Error).message); void loadSavedGames(); }
 }
 
+/** Registers the profile and warns if the server is up but not actually saving games (e.g. storage misconfigured). */
+async function checkSaving() {
+    try {
+        const p = await me.profile();
+        if (p.saving === 'memory') showToast("Heads up: the server isn't saving games right now, so progress won't carry over.");
+    } catch { /* offline or not signed in on the server: nothing to report */ }
+}
+
 function onUserChange(user: User | null) {
     const changed = user?.id !== S.user?.id;
     S.user = user;
     if (!changed) return;   // token refreshes also land here
     S.saved = [];
     S.stats = null;
-    if (user) void me.profile().catch(() => undefined);
+    if (user) void checkSaving();
     void loadSavedGames();
     if (!user && S.screen === 'stats') S.screen = 'home';
     if (S.screen !== 'game') render();
@@ -993,7 +1001,7 @@ render();
 // already sit in that game, otherwise offer to join.
 void (async () => {
     S.user = await initAuth(onUserChange);
-    if (S.user) { void me.profile().catch(() => undefined); void loadSavedGames(); }
+    if (S.user) { void checkSaving(); void loadSavedGames(); }
     const pending = takePendingRoom();   // an invite link survives the Google sign-in redirect
     if (pending && !new URLSearchParams(location.search).get('room')) history.replaceState(null, '', `${location.pathname}?room=${pending}`);
     const code = new URLSearchParams(location.search).get('room')?.toUpperCase();
