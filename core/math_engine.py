@@ -128,6 +128,19 @@ class MathEngine:
         except Exception as e:
             return False, f"Syntax Error: {e}"
 
+    @staticmethod
+    def _wraps_whole(expr_str, open_idx):
+        """True if the '(' at open_idx closes at the very last character."""
+        depth = 0
+        for i in range(open_idx, len(expr_str)):
+            if expr_str[i] == "(":
+                depth += 1
+            elif expr_str[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    return i == len(expr_str) - 1
+        return False
+
     def _parse_expression(self, expr_str):
         """
         Strips out custom calculus tile wrappers, parses the inner algebra 
@@ -136,19 +149,12 @@ class MathEngine:
         # Normalize e**x and e^x to SymPy's exp(x)
         expr_str = expr_str.replace("e**x", "exp(x)").replace("e^x", "exp(x)")
         
-        if expr_str.startswith("d/dx( ") or expr_str.startswith("d/dx("):
-            # Extract everything between d/dx( and the closing )
-            inner = expr_str[expr_str.index("(")+1 : -1]
-            parsed_inner = parse_expr(inner, transformations=self.transformations)
-            return sp.diff(parsed_inner, self.x)
-            
-        elif expr_str.startswith("int( ") or expr_str.startswith("int("):
-            # Extract everything between int( and the closing )
-            inner = expr_str[expr_str.index("(")+1 : -1]
-            parsed_inner = parse_expr(inner, transformations=self.transformations)
-            return sp.integrate(parsed_inner, self.x)
-            
-        else:
-            # Standard algebraic expressions
-            return parse_expr(expr_str, transformations=self.transformations)
+        expr_str = expr_str.strip()
+        for opener, operation in (("d/dx(", sp.diff), ("int(", sp.integrate)):
+            if expr_str.startswith(opener) and self._wraps_whole(expr_str, len(opener) - 1):
+                # The wrapper may itself contain another wrapper (d/dx(d/dx(x**3)) is a
+                # second derivative), so evaluate the inside recursively.
+                return operation(self._parse_expression(expr_str[len(opener):-1]), self.x)
 
+        # Standard algebraic expressions
+        return parse_expr(expr_str, transformations=self.transformations)

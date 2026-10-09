@@ -22,6 +22,7 @@ How a turn works
      an illegal one.
 """
 
+import cmath
 import itertools
 import math
 import random
@@ -33,9 +34,9 @@ import sympy as sp
 
 from core.game_entities import Move, make_tile
 
-# Sample points (x, a, b) used to fingerprint expressions. Fixed so results
+# Sample points (x, a, b, k) used to fingerprint expressions. Fixed so results
 # are deterministic, and chosen to avoid 0/1 where identities degenerate.
-SAMPLES = [(0.731, 1.427, -0.613), (1.219, -0.842, 2.105), (-0.457, 0.376, 1.671)]
+SAMPLES = [(0.731, 1.427, -0.613, 0.913), (1.219, -0.842, 2.105, -1.337), (-0.457, 0.376, 1.671, 1.882)]
 K = len(SAMPLES)
 _ROUND = 7
 
@@ -46,7 +47,7 @@ _FRACTION = re.compile(r"^(\d+)/(\d+)$")
 def _tile_value(symbol: str) -> Optional[Tuple[float, ...]]:
     """Value of a single tile at each sample point, or None if it isn't a plain value tile."""
     out = []
-    for x, a, b in SAMPLES:
+    for x, a, b, k in SAMPLES:
         if symbol == "x":
             v = x
         elif symbol == "(x+a)":
@@ -61,6 +62,12 @@ def _tile_value(symbol: str) -> Optional[Tuple[float, ...]]:
             v = math.sin(x)
         elif symbol == "cos(x)":
             v = math.cos(x)
+        elif symbol == "ln(x)":
+            v = math.log(abs(x))  # real part of log(x); the engine is the final judge
+        elif symbol == "1/x":
+            v = 1 / x
+        elif symbol == "k":
+            v = k
         elif symbol == "a":
             v = a
         elif symbol == "b":
@@ -84,6 +91,9 @@ def _key(vec) -> Optional[tuple]:
 
 # d/dx and integral fingerprints depend only on the expression, so every agent
 # (and every game in a stress run) shares one cache.
+# SymPy no longer accepts modules="cmath", so give lambdify complex-valued functions by name.
+_CMATH_NAMESPACE = [{"exp": cmath.exp, "log": cmath.log, "sin": cmath.sin, "cos": cmath.cos,
+                     "sqrt": cmath.sqrt}, "math"]
 _CALCULUS_CACHE: Dict[tuple, Optional[Tuple[float, ...]]] = {}
 
 
@@ -286,13 +296,13 @@ class SearchAgent:
             return _CALCULUS_CACHE[cache_key]
         result = None
         try:
-            x, a, b = sp.symbols("x a b")
+            x, a, b, k = sp.symbols("x a b k")
             expr = game.math._parse_expression("".join(inner_tokens))
             res = sp.diff(expr, x) if kind == "d/dx" else sp.integrate(expr, x)
             if not res.has(sp.Integral, sp.Piecewise, sp.zoo, sp.nan):
-                f = sp.lambdify((x, a, b), res, "cmath")
+                f = sp.lambdify((x, a, b, k), res, _CMATH_NAMESPACE)
                 vals = [complex(f(*pt)) for pt in SAMPLES]
-                if all(abs(v.imag) < 1e-9 and math.isfinite(v.real) for v in vals):
+                if all((abs(v.imag) < 1e-9 or res.has(sp.log)) and math.isfinite(v.real) for v in vals):
                     result = tuple(v.real for v in vals)
         except Exception:
             result = None
@@ -320,6 +330,12 @@ class SearchAgent:
                 vec = self._calculus_vec(game, kind, tup)
                 if vec is not None:
                     yield [open_tile, *inner, ")"], idx + 1, vec, kind
+                # second derivative: d/dx(d/dx(inner)) costs two openers and two closers
+                if kind == "d/dx" and rack[open_tile] >= 2 and rack[")"] >= 2:
+                    wrapped = (open_tile, *tup, ")")
+                    vec2 = self._calculus_vec(game, kind, wrapped)
+                    if vec2 is not None:
+                        yield [open_tile, open_tile, *inner, ")", ")"], idx + 2, vec2, kind
 
     # ------------------------------------------------------------------
     # Step 3: placement and scoring

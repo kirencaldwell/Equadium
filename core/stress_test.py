@@ -154,6 +154,7 @@ def play_one_game(seed: int, playbook=None, agent_types=None) -> dict:
             "scores": {p.name: p.score for p in game.players},
             "winners": game.winners,
             "actions": dict(actions),
+            "action_seq": [rec.action for rec in session.history],
             "illegal_agent_moves": session.illegal_agent_moves,
             "max_turn_seconds": max(turn_times) if turn_times else 0.0,
             "stats": res,

@@ -179,3 +179,21 @@ def test_fingerprints_agree_with_engine():
             assert s.game.execute_move(player, move), s.game.last_error
             checked += 1
     assert checked > 0
+
+
+# ---- ln(x), 1/x, k and stacked calculus tiles ----
+@pytest.mark.parametrize("equation", [
+    "d/dx(ln(x))=1/x",
+    "int(1/x)=ln(x)+C",
+    "d/dx(kx)=k",
+    "d/dx(d/dx(x**3))=6x",
+    "d/dx(int(x))=x+C",
+])
+def test_new_tiles_and_stacked_calculus_are_valid(equation):
+    ok, msg = fresh_session().game.math.validate_equation(equation)
+    assert ok, msg
+
+
+def test_second_derivative_scores_times_four():
+    game = fresh_session().game
+    assert game.config["tiles"]["d/dx("]["expr_multiplier"] ** 2 == 4

@@ -9,11 +9,13 @@ from datetime import datetime
 from typing import List, Optional
 
 import jwt  # PyJWT
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
-from web.api.models import PlayerModel, BoardModel, MoveModel, TileModel, CreateGameModel, SwapModel
+from web.api.models import MoveModel, CreateGameModel, SwapModel
+from web.api.serialize import game_to_model, tile_to_model, _tiles_from_model
 from core.game_config import CONFIG
 from core.game_entities import Tile
 from core.session import GameSession, MODES, HUMAN
@@ -65,11 +67,26 @@ logger = logging.getLogger("equadium_beta")
 
 app = FastAPI()
 
+# The frontend (e.g. on Vercel) calls this API from another origin.
+# ALLOWED_ORIGINS is a comma-separated list, e.g. "https://equadium.vercel.app".
+from web.api import rooms  # noqa: E402  (after app setup is fine; no circular import)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",")],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(rooms.router)
+
 sessions = {}  # game_id -> GameSession (simple in-memory storage)
 
 # Middleware for structured request logging
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    if request.method == "GET" and request.url.path.startswith("/rooms"):
+        return await call_next(request)   # clients poll these every second or two
     body = await request.body()
     log_entry = {
         "timestamp": datetime.now().isoformat(),
@@ -107,57 +124,10 @@ def log_game_state(game_id, game, action_type, extra=None):
     }
     logger.info(json.dumps(log_entry))
 
-def tile_to_model(tile):
-    if tile is None:
-        return None
-    return TileModel(
-        symbol=tile.symbol,
-        points=tile.points,
-        expr_multiplier=tile.expr_multiplier
-    )
-
-def game_to_model(session):
-    game = session.game
-    return {
-        "board": BoardModel(
-            width=game.board.width,
-            height=game.board.height,
-            grid=[
-                [tile_to_model(tile) for tile in row]
-                for row in game.board.grid
-            ]
-        ),
-        "players": [
-            PlayerModel(
-                name=p.name,
-                score=p.score,
-                rack=[tile_to_model(t) for t in p.rack],
-                equals_available=p.equals_available
-            )
-            for p in game.players
-        ],
-        "current_player": session.current_player.name,
-        "equals_pile_count": len(game.equals_bag),
-        "mode": session.mode,
-        "seats": {name: seat.kind for name, seat in session.seats.items()},
-        "game_over": game.is_game_over,
-        "end_reason": game.end_reason,
-        "winners": game.winners if game.is_game_over else [],
-        "turns_played": game.turns_played,
-        "bag_count": len(game.tile_bag),
-    }
-
 def _get_session(game_id: str) -> GameSession:
     if game_id not in sessions:
         raise HTTPException(status_code=404, detail="Game not found")
     return sessions[game_id]
-
-def _tiles_from_model(move: MoveModel):
-    return [
-        (p['r'], p['c'], Tile(symbol=p['tile']['symbol'], points=p['tile']['points'],
-                              expr_multiplier=p['tile']['expr_multiplier']))
-        for p in move.tiles_to_play
-    ]
 
 # ── Turn ownership helpers ──────────────────────────────────────────────────
 def _is_multiplayer(session) -> bool:
@@ -247,8 +217,14 @@ def get_game(game_id: str):
 @app.post("/games/{game_id}/validate_move")
 def validate_move(game_id: str, move: MoveModel):
     session = _get_session(game_id)
-    _, error = session.game.evaluate_play(_tiles_from_model(move), move.direction or "H")
-    return {"valid": error is None, "reason": error}
+    tiles = _tiles_from_model(move)
+    equations, error = session.game.evaluate_play(tiles, move.direction or "H")
+    return {
+        "valid": error is None,
+        "reason": error,
+        "equations": [eq for eq, _ in equations] if equations else [],
+        "score": session.game.score_play(equations, tiles) if equations else 0,
+    }
 
 
 @app.post("/games/{game_id}/draw_equals")
@@ -313,6 +289,13 @@ def autoplay(game_id: str):
     return {"results": session.game.get_final_results(), "end_reason": session.game.end_reason,
             "winners": session.game.winners}
 
-static_dir = "web/frontend/dist" if os.path.exists("web/frontend/dist") else "web/static"
-app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
-
+# Production: serve the built frontend (cd web/frontend && npm run build).
+# In development run `npm run dev` instead; Vite proxies API calls here.
+_dist = "web/frontend/dist"
+if os.path.exists(_dist):
+    app.mount("/", StaticFiles(directory=_dist, html=True), name="static")
+else:
+    @app.get("/")
+    def root():
+        return {"message": "Equadium API is running. Build the frontend with `cd web/frontend && npm run build`, "
+                           "or run `npm run dev` for development."}

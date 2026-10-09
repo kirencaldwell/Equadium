@@ -15,6 +15,25 @@ All three run on the same engine (`core/session.py`), so what is stress-tested i
 Other endpoints: `GET /modes`, `GET /games/{id}`, `POST /games/{id}/validate_move` (returns a `reason` when illegal).
 A rejected `play` returns `{"status": "failed", "error": "..."}` and does not consume the turn.
 
+## Running the app
+
+```
+pip install -r requirements.txt
+python -m uvicorn web.api.main:app --port 8000      # API
+cd web/frontend && npm install && npm run dev        # UI at http://localhost:3000 (proxies the API)
+```
+For production, `npm run build` and the API serves `web/frontend/dist` itself.
+Sign-in/online play is paused for now; the home screen offers solo, pass-and-play and bot-watching.
+
+## Deploying
+
+- **Frontend (Vercel):** import the repo, set *Root Directory* to `web/frontend` (build `npm run build`, output `dist`),
+  and add env var `VITE_API_URL` = your API's URL. Vite bakes it in at build time, so redeploy after changing it.
+- **API:** needs a long-running Python host (Render, Railway, Fly, ...), not Vercel serverless: games live in memory.
+  Start command: `uvicorn web.api.main:app --host 0.0.0.0 --port $PORT`; install with `pip install -r requirements.txt`.
+  Set `ALLOWED_ORIGINS` to your Vercel URL (comma-separated; defaults to `*`).
+  Run a single instance, since game state is in-process.
+
 ## Stress testing
 
 ```
