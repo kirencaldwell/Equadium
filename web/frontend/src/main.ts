@@ -10,6 +10,7 @@ import '@fontsource/stix-two-text/latin-400.css';
 import '@fontsource/stix-two-text/latin-400-italic.css';
 import '@fontsource/stix-two-text/latin-600.css';
 import '@fontsource/stix-two-text/latin-600-italic.css';
+import { inject } from '@vercel/analytics';
 import { api, me, room } from './api';
 import { ico } from './icons';
 import { authAvailable, initAuth, signInWithGoogle, signOut, takePendingRoom, type User } from './auth';
@@ -23,6 +24,9 @@ import type { GameState, Mode, Placed, Preview, SavedGame, Stats, Tile } from '.
 type Selection = { kind: 'rack'; index: number } | { kind: 'eq' } | { kind: 'placed'; r: number; c: number } | null;
 
 interface OnlineSeat { code: string; seat: string; token: string }
+
+// Vercel Web Analytics (page views and visitors). A no-op outside Vercel's deployment, so dev and tests send nothing.
+inject();
 
 const SAVE_KEY = 'equadium.online';
 const NAME_KEY = 'equadium.name';
