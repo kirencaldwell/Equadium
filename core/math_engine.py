@@ -51,19 +51,20 @@ class MathEngine:
 
         # Split by "=" if present
         if "=" in tokens:
-            eq_indices = [idx for idx, t in enumerate(tokens) if t == "="]
-            if len(eq_indices) > 1:
-                return False, "Multiple equals signs (=)"
-            eq_idx = eq_indices[0]
-            lhs = tokens[:eq_idx]
-            rhs = tokens[eq_idx+1:]
-
-            lhs_ok, lhs_msg = self.validate_sequence(lhs)
-            if not lhs_ok:
-                return False, f"LHS: {lhs_msg}"
-            rhs_ok, rhs_msg = self.validate_sequence(rhs)
-            if not rhs_ok:
-                return False, f"RHS: {rhs_msg}"
+            # A chain like 4(1/x)x = 2+2 = 4 has several "=": every part must be a valid expression.
+            parts, cur = [], []
+            for t in tokens:
+                if t == "=":
+                    parts.append(cur)
+                    cur = []
+                else:
+                    cur.append(t)
+            parts.append(cur)
+            for i, part in enumerate(parts):
+                ok, msg = self.validate_sequence(part)
+                if not ok:
+                    label = "LHS" if i == 0 else "RHS" if i == len(parts) - 1 else f"Part {i + 1}"
+                    return False, f"{label}: {msg}"
             return True, "Valid equation layout"
 
         # If no "=" is present, validate as a single expression
@@ -108,25 +109,20 @@ class MathEngine:
         if not is_gram_valid:
             return False, f"Invalid grammar: {gram_msg}"
 
-        left_str, right_str = expr_str.split("=", 1)
-
         # Enforce +C rule using CONFIG
-        is_integration = "int(" in left_str or "int(" in right_str
-        if is_integration and self.config["require_plus_c"]:
-            if "+C" not in left_str.replace(" ", "") and "+C" not in right_str.replace(" ", ""):
+        if "int(" in expr_str and self.config["require_plus_c"]:
+            if "+C" not in expr_str.replace(" ", ""):
                 return False, "Missing constant of integration (+C)"
 
         try:
-            # Clean up spacing and strip "+C" safely for evaluation
-            eval_left = left_str.replace("+C", "").replace("+ C", "").strip()
-            eval_right = right_str.replace("+C", "").replace("+ C", "").strip()
-            
-            # Parse using our flexible implicit parser
-            left_expr = self._parse_expression(eval_left)
-            right_expr = self._parse_expression(eval_right)
-            
-            is_valid = sp.simplify(left_expr - right_expr) == 0
-            return is_valid, "Valid"
+            # Every part of a chain (a = b = c) must equal the first one.
+            # Clean up spacing and strip "+C" safely for evaluation.
+            parts = [p.replace("+C", "").replace("+ C", "").strip() for p in expr_str.split("=")]
+            first = self._parse_expression(parts[0])
+            for part in parts[1:]:
+                if sp.simplify(first - self._parse_expression(part)) != 0:
+                    return False, "Valid"
+            return True, "Valid"
             
         except Exception as e:
             return False, f"Syntax Error: {e}"
