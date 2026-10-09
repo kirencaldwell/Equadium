@@ -30,7 +30,8 @@ inject();
 
 const SAVE_KEY = 'equadium.online';
 const NAME_KEY = 'equadium.name';
-const POLL_MS = 1500;
+const POLL_WAITING_MS = 2000;    // it's their move: check often so their play shows up quickly
+const POLL_MY_TURN_MS = 8000;    // it's your move: nothing to wait for, only catch a forfeit or a second device
 
 function loadSaved(): OnlineSeat | null {
     try { return JSON.parse(localStorage.getItem(SAVE_KEY) ?? 'null'); } catch { return null; }
@@ -387,16 +388,37 @@ function markFresh(before: GameState | null, after: GameState) {
 
 // ── Online games ────────────────────────────────────────────
 let pollTimer = 0;
+let polling = false;   // an online game is open and being watched
+let pollGen = 0;       // bumped on every (re)start so a request still in flight can't spawn a second loop
 
 function stopPolling() {
-    window.clearInterval(pollTimer);
+    window.clearTimeout(pollTimer);
     pollTimer = 0;
+    polling = false;
 }
 
+/** One request at a time (a slow server can't pile them up), then wait again; slower when it's your move. */
 function startPolling() {
     stopPolling();
-    pollTimer = window.setInterval(() => void pollOnce(), POLL_MS);
+    polling = true;
+    const gen = ++pollGen;
+    const tick = async () => {
+        await pollOnce();
+        if (gen !== pollGen || !polling || !S.online) return;
+        pollTimer = window.setTimeout(() => void tick(), myTurn() ? POLL_MY_TURN_MS : POLL_WAITING_MS);
+    };
+    pollTimer = window.setTimeout(() => void tick(), POLL_WAITING_MS);
 }
+
+/** Phones freeze background tabs; check straight away when the player comes back or the network returns. */
+function pollNow() {
+    if (!S.online || S.screen !== 'game' || document.hidden || !polling) return;
+    startPolling();
+    void pollOnce();
+}
+document.addEventListener('visibilitychange', pollNow);
+window.addEventListener('focus', pollNow);
+window.addEventListener('online', pollNow);
 
 async function pollOnce() {
     const o = S.online;
