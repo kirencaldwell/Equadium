@@ -181,6 +181,13 @@ def test_fingerprints_agree_with_engine():
     assert checked > 0
 
 
+# ---- fraction tiles next to numbers/variables read as products of tiles ----
+@pytest.mark.parametrize("equation", ["2+21/xx=4", "2x1/x=2", "31/2=3/2", "x1/x=1"])
+def test_fraction_tile_is_its_own_factor(equation):
+    ok, msg = fresh_session().game.math.validate_equation(equation)
+    assert ok, msg
+
+
 # ---- subtraction ("-") tile ----
 @pytest.mark.parametrize("equation", [
     "x**2-x=x**2-x",
