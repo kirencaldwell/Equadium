@@ -181,6 +181,40 @@ def test_fingerprints_agree_with_engine():
     assert checked > 0
 
 
+# ---- subtraction ("-") tile ----
+@pytest.mark.parametrize("equation", [
+    "x**2-x=x**2-x",
+    "d/dx(cos(x))=-sin(x)",
+    "int(sin(x))=-cos(x)+C",
+    "d/dx(x**2-x)=2x-1",
+    "-x+x=x-x",
+])
+def test_minus_tile_valid_equations(equation):
+    ok, msg = fresh_session().game.math.validate_equation(equation)
+    assert ok, msg
+
+
+@pytest.mark.parametrize("equation", ["x-=x", "x--x=x", "x+-x=0", "x-)=x", "x*-x=-x**2"])
+def test_minus_tile_grammar_rejects_misplaced_signs(equation):
+    ok, _ = fresh_session().game.math.validate_equation(equation)
+    assert not ok
+
+
+def test_minus_tile_is_in_the_bag():
+    assert CONFIG["tiles"]["-"]["count"] > 0
+
+
+def test_agent_plays_the_minus_tile_legally():
+    used = 0
+    for seed in range(2):
+        random.seed(seed)
+        g = GameSession("agent_vs_agent", CONFIG)
+        g.run_to_completion()
+        assert g.illegal_agent_moves == 0
+        used += sum(1 for r in g.history if r.action == "play" and "-" in (r.tiles or []))
+    assert used > 0
+
+
 # ---- ln(x), 1/x, k and stacked calculus tiles ----
 @pytest.mark.parametrize("equation", [
     "d/dx(ln(x))=1/x",

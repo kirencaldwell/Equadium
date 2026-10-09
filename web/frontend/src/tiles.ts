@@ -15,6 +15,7 @@ export function tileKind(symbol: string): 'calc' | 'fn' | 'eq' | 'var' | 'num' |
 /** Typeset a tile symbol (or a whole equation string) as HTML. */
 export function math(src: string): string {
     return esc(src)
+        .replace(/-/g, '\u2212')   // a real minus sign
         .replace(/x\*\*(\d)/g, 'x<sup>$1</sup>')
         .replace(/e\^x/g, 'e<sup>x</sup>')
         .replace(/(\d)\/([\dx])/g, '<span class="frac"><i>$1</i><i>$2</i></span>')

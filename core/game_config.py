@@ -35,6 +35,7 @@ CONFIG = {
         "1/3": {"count": 5, "points": 3},
         "1/6": {"count": 4, "points": 3},
         "+": {"count": 14, "points": 1},
+        "-": {"count": 8, "points": 1},
         #"*" : {"count": 16, "points": 0},  # <--- MAKE SURE THIS LINE IS HERE
         
         # Calculus Operations (Multipliers)
