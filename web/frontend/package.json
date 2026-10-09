@@ -15,6 +15,9 @@
     "vite": "^5.1.4"
   },
   "dependencies": {
+    "@fontsource/cormorant-garamond": "^5.3.0",
+    "@fontsource/jost": "^5.3.0",
+    "@fontsource/stix-two-text": "^5.3.0",
     "firebase": "^11.10.0"
   }
 }

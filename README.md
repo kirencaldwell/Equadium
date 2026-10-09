@@ -114,6 +114,19 @@ A stale file is ignored (the agent still works, just slowly on small servers) an
 Each computer turn also has a soft time budget (default 6 s, `EQUADIUM_AGENT_TIME_BUDGET`): on a slow host the
 agent stops deepening and skips uncached work, so it plays slightly weaker moves instead of making you wait.
 
+## Look and feel
+
+The theme is "Verdigris & Brass": ivory tiles on deep green felt, brass accents, ink-green chrome, with light and dark
+modes (the felt board is green in both). Tiles are colour-coded by role: ivory (numbers, variables), parchment
+(operators), patina (functions), brass (calculus, the high scorers) and carbon (the equals sign). Everything is in
+`web/frontend/src/style.css`; the colours are CSS variables at the top of the file, so re-skinning is a matter of
+changing those.
+
+Typography is Cormorant Garamond (wordmark, scores), Jost (interface) and STIX Two Text (the math). The fonts are
+bundled with the app via `@fontsource/*` packages, so there are no third-party font requests. The integral sign and
+the interface icons are drawn as inline SVG (`src/tiles.ts`, `src/icons.ts`), because no bundled font carries a good
+integral and emoji render differently on every device.
+
 ## Browser Back / Forward
 
 Every screen has a URL (`#/online`, `#/stats`, `#/game/<id>`, `#/room/<CODE>`; the menu has none), so the browser's

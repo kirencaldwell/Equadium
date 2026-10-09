@@ -19,7 +19,7 @@ export function math(src: string): string {
         .replace(/e\^x/g, 'e<sup>x</sup>')
         .replace(/(\d)\/([\dx])/g, '<span class="frac"><i>$1</i><i>$2</i></span>')
         .replace(/d\/dx\(/g, '<span class="ddx">d/dx</span>(')
-        .replace(/int\(/g, '<span class="integral">∫</span>(')
+        .replace(/int\(/g, '<svg class="integral" viewBox="0 0 12 28" aria-label="integral"><path d="M9.4 4.4C9.2 2.4 7.9 1.3 6.6 1.3 4.9 1.3 4.5 2.9 4.5 5.2V22.8C4.5 25.1 4.1 26.7 2.4 26.7 1.1 26.7 .8 25.6 .6 24.4"/><circle cx="9.7" cy="5.4" r="1.15"/><circle cx="1.6" cy="23.9" r="1.15"/></svg>(')
         .replace(/\bexp\(/g, '<span class="fn">exp</span>(')
         .replace(/\b(sin|cos|ln)\(x\)/g, '<span class="fn">$1</span>(x)');
 }
