@@ -141,17 +141,30 @@ class MathEngine:
         return False
 
     _FRACTION_TILE = re.compile(r"^\d/[\dx]$")
+    _NUMBER_TILE = re.compile(r"^\d+$")
+    # Tokens that are a value on their own (a term to multiply), as opposed to operators and openers.
+    _VALUE_TILE = re.compile(r"^(?:\d+|\d/[\dx]|[xabkC]|\(x\+[ab]\)|x\*\*\d|e\^x|(?:sin|cos|ln)\(x\))$")
 
-    def _group_fraction_tiles(self, expr_str):
+    def _join_tiles(self, expr_str):
         """
-        Tiles are glued into one string, so a fraction tile next to a number or a variable is ambiguous:
-        the tiles 2, 1/x, x spell "21/xx", which would read as 21/(x*x) rather than 2*(1/x)*x. Re-tokenise
-        and wrap each fraction tile in brackets so it always means exactly that tile.
+        Tiles are glued into one string, so neighbouring tiles can blur together: the tiles 2, 1/x, x spell
+        "21/xx" (read as 21/(x*x) rather than 2*(1/x)*x), and x**4, 2 spell "x**42" (read as x to the 42nd).
+        Re-tokenise and join the tiles explicitly: fractions get brackets, and two adjacent values are
+        multiplied. The one exception is digit tiles, which still run together as a number (2, 3 -> 23).
         """
-        return "".join(f"({t})" if self._FRACTION_TILE.match(t) else t for t in self.tokenize(expr_str))
+        out, prev = [], None
+        for t in self.tokenize(expr_str):
+            is_value = bool(self._VALUE_TILE.match(t)) or t in ("exp(",)
+            prev_is_value = prev is not None and (bool(self._VALUE_TILE.match(prev)) or prev == ")")
+            both_digits = prev is not None and self._NUMBER_TILE.match(prev) and self._NUMBER_TILE.match(t)
+            if is_value and prev_is_value and not both_digits:
+                out.append("*")
+            out.append(f"({t})" if self._FRACTION_TILE.match(t) else t)
+            prev = t
+        return "".join(out)
 
     def _parse_expression(self, expr_str):
-        return self._parse_grouped(self._group_fraction_tiles(expr_str))
+        return self._parse_grouped(self._join_tiles(expr_str))
 
     def _parse_grouped(self, expr_str):
         """
