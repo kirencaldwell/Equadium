@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "e2e:nav": "node e2e/navigation.mjs",
     "e2e:forfeit": "node e2e/forfeit.mjs",
-    "e2e:calc": "node e2e/calc.mjs"
+    "e2e:calc": "node e2e/calc.mjs",
+    "e2e:waiting": "node e2e/waiting.mjs"
   },
   "devDependencies": {
     "typescript": "^5.3.3",

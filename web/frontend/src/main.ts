@@ -97,6 +97,10 @@ function actingPlayer(): string | null {
     return g.current_player;
 }
 
+/** You may arrange tiles whenever the game is live and you hold a seat, so you can try a play while the
+ *  opponent is thinking. Only submitting (play / swap / pass) needs it to be your turn. */
+const canArrange = () => !!S.game && !S.game.game_over && (!S.online || !!S.game.joined) && actingPlayer() !== null && !S.busy;
+
 const myTurn = () => !!S.game && !S.game.game_over && (!S.online || !!S.game.joined) && actingPlayer() === S.game.current_player && !S.busy;
 
 function myRack(): Tile[] {
@@ -381,6 +385,19 @@ function markFresh(before: GameState | null, after: GameState) {
             if (after.board.grid[r][c] && !before.board.grid[r][c]) S.fresh.add(`${r},${c}`);
 }
 
+/** The opponent moved: keep the tiles you were trying out (dropping any that landed on a square they just
+ *  filled) and re-check them against the new board. */
+function keepPendingTiles() {
+    const g = S.game;
+    if (!g || g.game_over || !S.placed.length) { resetTurnState(); return; }
+    S.placed = S.placed.filter(p => !g.board.grid[p.r][p.c]);
+    S.selected = null;
+    S.preview = null;
+    S.swapPick.clear();
+    previewToken++;
+    if (S.placed.length) schedulePreview();
+}
+
 // ── Online games ────────────────────────────────────────────
 let pollTimer = 0;
 
@@ -408,7 +425,7 @@ async function pollOnce() {
         const theirs = !!lm && lm.player !== o.seat && JSON.stringify(lm) !== JSON.stringify(before?.last_move);
         if (before && !before.joined && S.game.joined) showToast(`${display(otherSeat())} joined. Let's play!`);
         else if (theirs && lm) showToast(describeMove(lm.player, lm.action, lm.tiles?.length ?? 0, lm.score_delta));
-        resetTurnState();
+        keepPendingTiles();
         if (S.game.game_over) { S.modal = 'over'; saveSeat(null); stopPolling(); }
         render();
         if (theirs) centerOnLastMove();
@@ -550,7 +567,7 @@ const usedRackIdx = () => new Set(S.placed.filter(p => p.src !== 'eq').map(p => 
 const freeEqualsAvailable = () => !S.placed.some(p => p.src === 'eq') && (S.game?.equals_pile_count ?? 0) > 0;
 
 function placeSelectedAt(r: number, c: number) {
-    if (!S.game || !myTurn() || S.game.board.grid[r][c] || S.placed.some(p => p.r === r && p.c === c)) return;
+    if (!S.game || !canArrange() || S.game.board.grid[r][c] || S.placed.some(p => p.r === r && p.c === c)) return;
     const sel = S.selected;
     if (!sel) return;
     if (sel.kind === 'placed') {
@@ -819,7 +836,7 @@ function boardHtml(g: GameState): string {
     const midR = Math.floor(height / 2), midC = Math.floor(width / 2);
     const placedAt = new Map(S.placed.map(p => [`${p.r},${p.c}`, p]));
     const valid = S.preview?.valid;
-    const canDrop = myTurn();
+    const canDrop = canArrange();
     let html = `<div class="board" style="grid-template-columns:repeat(${width}, var(--cell-size))">`;
     for (let r = 0; r < height; r++) {
         for (let c = 0; c < width; c++) {
@@ -863,7 +880,7 @@ function rackHtml(): string {
 function previewHtml(): string {
     const p = S.preview;
     if (!S.placed.length) {
-        return `<div class="preview hint">${S.game && myTurn() ? 'Tap a tile, then tap a square. Build equations that connect to the board.' : ''}</div>`;
+        return `<div class="preview hint">${S.game && myTurn() ? 'Tap a tile, then tap a square. Build equations that connect to the board.' : canArrange() ? 'Not your turn yet. You can still try tiles to plan your play.' : ''}</div>`;
     }
     if (!p) return '<div class="preview hint">…</div>';
     if (p.valid) {
@@ -879,13 +896,15 @@ function humanReason(reason: string): string {
 
 function actionsHtml(g: GameState): string {
     const can = myTurn();
+    const arrange = canArrange();
     const playable = can && !!S.preview?.valid;
+    const waiting = !can && arrange && !!S.preview?.valid;
     return `<div class="actions">
-        <button class="ghost" data-act="shuffle" ${can ? '' : 'disabled'} aria-label="Shuffle">${ico('shuffle')}<small>Shuffle</small></button>
-        <button class="ghost" data-act="recall" ${can && S.placed.length ? '' : 'disabled'} aria-label="Recall">${ico('undo')}<small>Recall</small></button>
+        <button class="ghost" data-act="shuffle" ${arrange ? '' : 'disabled'} aria-label="Shuffle">${ico('shuffle')}<small>Shuffle</small></button>
+        <button class="ghost" data-act="recall" ${arrange && S.placed.length ? '' : 'disabled'} aria-label="Recall">${ico('undo')}<small>Recall</small></button>
         <button class="ghost" data-act="swap" ${can && g.bag_count > 0 && !S.placed.length ? '' : 'disabled'} aria-label="Swap">${ico('swap')}<small>Swap</small></button>
         <button class="ghost" data-act="pass" ${can && !S.placed.length ? '' : 'disabled'} aria-label="Pass">${ico('skip')}<small>Pass</small></button>
-        <button class="primary" data-act="play" ${playable ? '' : 'disabled'}>Play${playable ? ` · +${S.preview!.score}` : ''}</button>
+        <button class="primary" data-act="play" ${playable ? '' : 'disabled'}>${waiting ? 'Wait for your turn' : `Play${playable ? ` · +${S.preview!.score}` : ''}`}</button>
     </div>`;
 }
 
@@ -1111,13 +1130,13 @@ app.addEventListener('click', (e) => {
             case 'close': case 'close-scrim': closeModal(); break;
             case 'home': goHome(); break;
             case 'pick': {
-                if (!myTurn()) break;
+                if (!canArrange()) break;
                 const i = Number(actEl.dataset.i);
                 S.selected = S.selected?.kind === 'rack' && S.selected.index === i ? null : { kind: 'rack', index: i };
                 render(); break;
             }
             case 'pick-eq':
-                if (!myTurn()) break;
+                if (!canArrange()) break;
                 S.selected = S.selected?.kind === 'eq' ? null : { kind: 'eq' };
                 render(); break;
             case 'shuffle': {
@@ -1156,7 +1175,7 @@ app.addEventListener('click', (e) => {
         if (placed) {
             // tap a pending tile: pick it up (to move) — tap again to send it home
             if (S.selected?.kind === 'placed' && S.selected.r === r && S.selected.c === c) recall(r, c);
-            else if (myTurn()) { S.selected = { kind: 'placed', r, c }; render(); }
+            else if (canArrange()) { S.selected = { kind: 'placed', r, c }; render(); }
         } else {
             placeSelectedAt(r, c);
         }
