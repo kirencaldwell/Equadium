@@ -1,3 +1,5 @@
+import re
+
 import sympy as sp
 
 
@@ -142,7 +144,20 @@ class MathEngine:
                     return i == len(expr_str) - 1
         return False
 
+    _FRACTION_TILE = re.compile(r"^\d/[\dx]$")
+
+    def _group_fraction_tiles(self, expr_str):
+        """
+        Tiles are glued into one string, so a fraction tile next to a number or a variable is ambiguous:
+        the tiles 2, 1/x, x spell "21/xx", which would read as 21/(x*x) rather than 2*(1/x)*x. Re-tokenise
+        and wrap each fraction tile in brackets so it always means exactly that tile.
+        """
+        return "".join(f"({t})" if self._FRACTION_TILE.match(t) else t for t in self.tokenize(expr_str))
+
     def _parse_expression(self, expr_str):
+        return self._parse_grouped(self._group_fraction_tiles(expr_str))
+
+    def _parse_grouped(self, expr_str):
         """
         Strips out custom calculus tile wrappers, parses the inner algebra 
         with implicit multiplication allowed, and applies the calculus operation.
@@ -155,7 +170,7 @@ class MathEngine:
             if expr_str.startswith(opener) and self._wraps_whole(expr_str, len(opener) - 1):
                 # The wrapper may itself contain another wrapper (d/dx(d/dx(x**3)) is a
                 # second derivative), so evaluate the inside recursively.
-                return operation(self._parse_expression(expr_str[len(opener):-1]), self.x)
+                return operation(self._parse_grouped(expr_str[len(opener):-1]), self.x)
 
         # Standard algebraic expressions
         return parse_expr(expr_str, transformations=self.transformations)
