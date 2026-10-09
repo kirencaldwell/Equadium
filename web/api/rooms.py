@@ -284,3 +284,11 @@ def pass_turn(code: str, x_player_token: Optional[str] = Header(None),
               user: Optional[AuthUser] = Depends(optional_user)):
     room = _get_room(code)
     return _act(room, x_player_token, user, lambda s, seat: s.pass_turn(seat))
+
+
+@router.post("/{code}/forfeit")
+def forfeit(code: str, x_player_token: Optional[str] = Header(None),
+            user: Optional[AuthUser] = Depends(optional_user)):
+    """Give up: a loss for you and a win for your opponent. Unlike a move, this works on either side's turn."""
+    room = _get_room(code)
+    return _act(room, x_player_token, user, lambda s, seat: s.forfeit(seat))

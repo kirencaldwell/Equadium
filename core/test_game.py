@@ -315,3 +315,52 @@ def test_time_budget_bounds_a_cold_turn(monkeypatch):
     assert elapsed < 3.0, f"cold turn took {elapsed:.1f}s despite a 0.3s budget"
     assert move is None or move.is_play
     assert agent.stats["budget_skips"] > 0 or agent.stats["budget_hits"] > 0
+
+
+# ── forfeit ─────────────────────────────────────────────────────────────────
+def test_forfeit_is_a_loss_for_the_forfeiter_whatever_the_scores():
+    s = fresh_session()
+    s.game.players[0].score, s.game.players[1].score = 90, 3        # the forfeiter is far ahead
+    rec = s.forfeit("Player1")
+    assert rec.ok and rec.action == "forfeit"
+    g = s.game
+    assert s.is_over and g.end_reason == "forfeit" and g.forfeited_by == "Player1"
+    assert g.winners == ["Player2"]                                  # the other player wins despite fewer points
+    assert [r.action for r in s.history] == ["forfeit"]
+
+
+def test_forfeit_works_on_the_opponents_turn():
+    s = fresh_session()
+    assert s.current_player.name == "Player1"
+    s.forfeit("Player2")                                              # not Player2's turn, still allowed
+    assert s.game.winners == ["Player1"]
+
+
+def test_nothing_can_be_done_after_a_forfeit():
+    s = fresh_session(rack0=["=", "x"])
+    s.forfeit("Player1")
+    for act in (lambda: s.play("Player1", place(s.game, ["=", "x"], (CENTER[0], CENTER[1] + 1)), "H"),
+                lambda: s.swap("Player1", [0]), lambda: s.pass_turn("Player1"), lambda: s.forfeit("Player2")):
+        with pytest.raises(ValueError, match="over"):
+            act()
+
+
+def test_only_humans_can_forfeit():
+    s = fresh_session("human_vs_agent")
+    with pytest.raises(ValueError):
+        s.forfeit("AI_Opponent")
+    with pytest.raises(KeyError):
+        s.forfeit("Nobody")
+    with pytest.raises(ValueError):
+        fresh_session("agent_vs_agent").forfeit("Newton_Bot")
+    assert not s.is_over                                              # the refused attempts changed nothing
+
+
+def test_forfeit_survives_saving_and_old_saves_still_load():
+    s = fresh_session()
+    s.forfeit("Player2")
+    loaded = _roundtrip(s)
+    assert loaded.is_over and loaded.game.forfeited_by == "Player2" and loaded.game.winners == ["Player1"]
+    legacy = fresh_session().to_dict()
+    del legacy["game"]["forfeited_by"]                                # a game saved before forfeits existed
+    assert GameSession.from_dict(legacy, CONFIG).game.forfeited_by is None

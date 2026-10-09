@@ -38,6 +38,7 @@ def game_to_model(session):
         "seats": {name: seat.kind for name, seat in session.seats.items()},
         "game_over": game.is_game_over,
         "end_reason": game.end_reason,
+        "forfeited_by": game.forfeited_by,
         "winners": game.winners if game.is_game_over else [],
         "turns_played": game.turns_played,
         "bag_count": len(game.tile_bag),

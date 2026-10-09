@@ -65,7 +65,7 @@ class Seat:
 class TurnRecord:
     """What happened on one turn; handy for logs and for the UI."""
     player: str
-    action: str          # "play" | "swap" | "pass"
+    action: str          # "play" | "swap" | "pass" | "forfeit"
     ok: bool
     score_delta: int = 0
     error: Optional[str] = None
@@ -213,6 +213,23 @@ class GameSession:
             score_delta=(player.score - score_before) if action == "play" else 0,
             error=None if ok else self.game.last_error, tiles=tiles, cells=cells,
         )
+        if ok:
+            self.history.append(rec)
+        return rec
+
+    def forfeit(self, player_name: str) -> TurnRecord:
+        """A human gives up: a loss for them and a win for the other player. Unlike a move, this is
+        allowed whether or not it is their turn."""
+        if self.is_over:
+            raise ValueError("The game is over")
+        seat = self.seats.get(player_name)
+        if seat is None:
+            raise KeyError(f"No such player '{player_name}'")
+        if seat.kind != HUMAN:
+            raise ValueError(f"'{player_name}' is not a human seat")
+        player = self.player(player_name)
+        ok = self.game.forfeit(player)
+        rec = TurnRecord(player=player_name, action="forfeit", ok=ok, error=None if ok else self.game.last_error)
         if ok:
             self.history.append(rec)
         return rec

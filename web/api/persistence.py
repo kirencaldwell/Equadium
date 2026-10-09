@@ -68,7 +68,8 @@ def result_rows(game_id: str, kind: str, session: GameSession, seat_users: Dict[
             "swaps": sum(1 for r in mine if r.action == "swap"),
             "passes": sum(1 for r in mine if r.action == "pass"),
             "best_play": max((r.score_delta for r in plays), default=0),
-            "turns": len(mine),
+            "turns": sum(1 for r in mine if r.action != "forfeit"),
+            "forfeit": g.forfeited_by == seat,          # this player gave up (so the loss was by choice)
             "finished_at": now_iso(),
         })
     return rows
@@ -113,6 +114,7 @@ def compute_stats(rows: List[dict]) -> dict:
         "best_play": max((r["best_play"] for r in rows), default=0),
         "total_plays": sum(r["plays"] for r in rows),
         "win_streak": streak,
+        "forfeits": sum(bool(r.get("forfeit")) for r in rows),   # older rows have no such field
         "vs_computer": split("agent"), "vs_humans": split("human"),
         "recent": [{k: r[k] for k in ("game_id", "mode", "opponent", "outcome", "score", "opp_score", "finished_at")}
                    for r in rows[:10]],

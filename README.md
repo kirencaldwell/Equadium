@@ -92,6 +92,15 @@ precomputed table (`core/math_playbook.py`, kept as a baseline: it grows as tile
 table takes many minutes to build). It enumerates what the rack can spell, fingerprints each expression
 numerically, and joins equal fingerprints (meet in the middle); SymPy only verifies the final candidates.
 
+## Forfeiting
+
+The flag in the game header lets a player give up (after a confirmation). It ends the game at once as a **loss for
+the forfeiter and a win for the other player, whatever the score**, and it works on either side's turn. In an online
+game the opponent's screen picks it up on its next poll and tells them they won. For signed-in players it is recorded
+like any finished game (a loss, plus a `forfeits` count in `/me/stats`); Pass & Play games stay out of the stats as
+before. API: `POST /games/{id}/forfeit?player=...` and `POST /rooms/{code}/forfeit`. Browser checks:
+`npm run e2e:forfeit` (see `web/frontend/e2e/`).
+
 ## Keeping the agent fast
 
 The agent's slowest work (SymPy integrals and a few parser quirks) is deterministic, so it is precomputed into
