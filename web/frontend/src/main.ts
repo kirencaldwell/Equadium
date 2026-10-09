@@ -943,7 +943,7 @@ const CALC_ROWS: [string, string, string][] = [
     ['x**2', '2x', '1/3x**3'],
     ['x**3', '3x**2', '1/4x**4'],
     ['x**4', '4x**3', '1/5x**5'],
-    ['1/x', '-<span class="frac"><i>1</i><i>x<sup>2</sup></i></span>', 'ln(x)'],
+    ['1/x', '\u2212<span class="frac"><i>1</i><i>x<sup>2</sup></i></span>', 'ln(x)'],
     ['e^x', 'e^x', 'e^x'],
     ['sin(x)', 'cos(x)', '-cos(x)'],
     ['cos(x)', '-sin(x)', 'sin(x)'],
@@ -952,7 +952,7 @@ const CALC_ROWS: [string, string, string][] = [
 
 function calcTableHtml(): string {
     const head = `<div class="ct-row ct-head"><span>f(x)</span><span>${math('d/dx(')}f)</span><span>${math('int(')}f) +C</span></div>`;
-    const rows = CALC_ROWS.map(([f, d, i]) => `<div class="ct-row"><span>${math(f)}</span><span>${d.startsWith('-<') ? d : math(d)}</span><span>${math(i)}</span></div>`).join('');
+    const rows = CALC_ROWS.map(([f, d, i]) => `<div class="ct-row"><span>${math(f)}</span><span>${d.startsWith('\u2212<') ? d : math(d)}</span><span>${math(i)}</span></div>`).join('');
     return `<div class="ctable" role="table">${head}${rows}</div>`;
 }
 

@@ -36,14 +36,15 @@ class MathEngine:
     def validate_sequence(self, tokens):
         """
         Validates a sequence of tokens against grammatical rules:
-        - No leading or trailing binary operators (+, *).
+        - No leading or trailing binary operators (+, *, -). A leading "-" is allowed: it is a sign
+          ("-sin(x)", "d/dx(-x)"), not a subtraction.
         - No consecutive binary operators (e.g. ++, +*).
         - No binary operator immediately following a boundary (d/dx(, int(), or preceding ).
         """
         if not tokens:
             return False, "Empty expression"
 
-        BINARY_OPERATORS = {"+", "*"}
+        BINARY_OPERATORS = {"+", "*", "-"}
         START_BOUNDARIES = {"d/dx(", "int("}
 
         # Split by "=" if present
@@ -65,7 +66,7 @@ class MathEngine:
 
         # If no "=" is present, validate as a single expression
         # Rule 1: Cannot start with a binary operator
-        if tokens[0] in BINARY_OPERATORS:
+        if tokens[0] in BINARY_OPERATORS and tokens[0] != "-":
             return False, f"Expression starts with operator '{tokens[0]}'"
 
         # Rule 2: Cannot end with a binary operator
@@ -84,7 +85,7 @@ class MathEngine:
             # Rule 4: No operator immediately following d/dx( or int(
             if token in START_BOUNDARIES and idx + 1 < len(tokens):
                 next_token = tokens[idx + 1]
-                if next_token in BINARY_OPERATORS:
+                if next_token in BINARY_OPERATORS and next_token != "-":
                     return False, f"Operator '{next_token}' follows boundary '{token}'"
 
             # Rule 5: No operator immediately preceding )

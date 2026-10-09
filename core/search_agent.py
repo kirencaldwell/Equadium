@@ -312,21 +312,23 @@ class SearchAgent:
         Also returns by_len for the short anchor-companion expressions.
         """
         usable = {s: n for s, n in rack_symbols.items()
-                  if s in self.value_tiles or s in ("+", "exp(", ")")}
+                  if s in self.value_tiles or s in ("+", "-", "exp(", ")")}
         symbols = sorted(usable)
         pool: Dict[tuple, list] = defaultdict(list)
         short: List[tuple] = []
         counts = dict(usable)
         zero = (0.0,) * K
-        frames: List[tuple] = []  # open exp( groups: (outer_total, outer_term)
+        frames: List[tuple] = []  # open exp( groups: (outer_total, outer_term, outer_neg)
 
         nodes = [0]
 
-        def dfs(tokens, n, total, term, last_is_value, has_plus):
+        def dfs(tokens, n, total, term, last_is_value, has_plus, neg=False):
             nodes[0] += 1
             # n = non-bracket tiles used so far (the length budget).
             # total = sum of finished terms, term = product so far (None right
-            # after '+' or 'exp('), both for the innermost open group.
+            # after '+', '-' or 'exp('), both for the innermost open group.
+            # neg = a '-' sign is waiting to be applied to the next factor (subtraction negates the whole
+            # following term; a leading '-' is a sign).
             if last_is_value and not frames:
                 vec = tuple(t + p for t, p in zip(total, term))
                 k = _key(vec)
@@ -346,6 +348,10 @@ class SearchAgent:
                 elif s == "+":
                     if not last_is_value or n >= max_len:
                         continue
+                elif s == "-":
+                    # binary after a value, or a sign at the very start of an expression / bracket
+                    if n >= max_len or not (last_is_value or prev is None or prev == "exp("):
+                        continue
                 else:  # value tile or exp(
                     if n >= max_len or (last_is_value and (prev, s) in bad_pairs):
                         continue
@@ -353,20 +359,31 @@ class SearchAgent:
                 tokens.append(s)
                 if s == "+":
                     dfs(tokens, n + 1, tuple(t + p for t, p in zip(total, term)), None, False, True)
+                elif s == "-":
+                    if last_is_value:
+                        dfs(tokens, n + 1, tuple(t + p for t, p in zip(total, term)), None, False, True, True)
+                    else:
+                        dfs(tokens, n + 1, total, None, False, has_plus, True)
                 elif s == "exp(":
-                    frames.append((total, term))
+                    frames.append((total, term, neg))
                     dfs(tokens, n, zero, None, False, has_plus)
                     frames.pop()
                 elif s == ")":
-                    outer_total, outer_term = frames.pop()
+                    outer_total, outer_term, outer_neg = frames.pop()
                     inner = tuple(t + p for t, p in zip(total, term))
                     val = tuple(math.exp(v) if v < 50 else math.inf for v in inner)
-                    new_term = val if outer_term is None else tuple(p * q for p, q in zip(outer_term, val))
+                    if outer_term is not None:
+                        new_term = tuple(p * q for p, q in zip(outer_term, val))
+                    else:
+                        new_term = tuple(-v for v in val) if outer_neg else val
                     dfs(tokens, n, outer_total, new_term, True, has_plus)
-                    frames.append((outer_total, outer_term))
+                    frames.append((outer_total, outer_term, outer_neg))
                 else:
                     v = self.value_tiles[s]
-                    new_term = v if term is None else tuple(p * q for p, q in zip(term, v))
+                    if term is not None:
+                        new_term = tuple(p * q for p, q in zip(term, v))
+                    else:
+                        new_term = tuple(-x for x in v) if neg else v
                     dfs(tokens, n + 1, total, new_term, True, has_plus)
                 tokens.pop()
                 counts[s] += 1
