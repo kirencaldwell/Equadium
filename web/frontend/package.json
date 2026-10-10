@@ -10,6 +10,7 @@
     "e2e:nav": "node e2e/navigation.mjs",
     "e2e:forfeit": "node e2e/forfeit.mjs",
     "e2e:calc": "node e2e/calc.mjs",
+    "e2e:pinch": "node e2e/pinch.mjs",
     "e2e:push": "node e2e/push.mjs",
     "e2e:waiting": "node e2e/waiting.mjs",
     "e2e:autoupdate": "node e2e/autoupdate.mjs"

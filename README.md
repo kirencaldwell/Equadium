@@ -142,6 +142,12 @@ bundled with the app via `@fontsource/*` packages, so there are no third-party f
 the interface icons are drawn as inline SVG (`src/tiles.ts`, `src/icons.ts`), because no bundled font carries a good
 integral and emoji render differently on every device.
 
+## Zooming the board
+
+On touch screens, pinch the board to zoom (the browser's own page zoom is disabled on the board so the two don't fight); the
++/- buttons are hidden there and only shown for mouse users, who can also Ctrl/⌘ + scroll or pinch a trackpad. The target
+button recentres. `npm run e2e:pinch` drives a real two-finger pinch.
+
 ## Browser Back / Forward
 
 Every screen has a URL (`#/online`, `#/stats`, `#/game/<id>`, `#/room/<CODE>`; the menu has none), so the browser's

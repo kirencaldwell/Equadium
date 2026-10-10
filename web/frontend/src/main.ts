@@ -704,8 +704,7 @@ function stopWatching() {
 // Rendering
 // ─────────────────────────────────────────────
 function render() {
-    const base = window.matchMedia('(max-width: 480px)').matches ? 42 : 46;
-    document.documentElement.style.setProperty('--cell-size', `${Math.round(base * S.zoom)}px`);
+    document.documentElement.style.setProperty('--cell-size', `${Math.round(baseCell() * S.zoom)}px`);
     const scroller = document.querySelector('.board-scroll') as HTMLElement | null;
     const pos = scroller ? { x: scroller.scrollLeft, y: scroller.scrollTop } : null;
     app.innerHTML = S.screen === 'home' ? homeHtml() : S.screen === 'online' ? onlineHtml() : S.screen === 'stats' ? statsHtml() : gameHtml();
@@ -1161,18 +1160,56 @@ function centerOnLastMove() {
     scrollToCell(r, c);
 }
 
+const ZOOM_MIN = 0.5, ZOOM_MAX = 2.2;
+const baseCell = () => window.matchMedia('(max-width: 480px)').matches ? 42 : 46;
+
 function setZoom(z: number) {
-    S.zoom = Math.max(0.6, Math.min(1.6, z));
     const sc = document.getElementById('board-scroll');
-    const cx = sc ? (sc.scrollLeft + sc.clientWidth / 2) / sc.scrollWidth : 0.5;
-    const cy = sc ? (sc.scrollTop + sc.clientHeight / 2) / sc.scrollHeight : 0.5;
-    render();
-    const next = document.getElementById('board-scroll');
-    if (next) {
-        next.scrollLeft = cx * next.scrollWidth - next.clientWidth / 2;
-        next.scrollTop = cy * next.scrollHeight - next.clientHeight / 2;
+    zoomAround(z, sc ? sc.clientWidth / 2 : 0, sc ? sc.clientHeight / 2 : 0);
+}
+
+/** Sets the zoom and keeps the board point under (mx, my) (relative to the board's viewport) where it is. */
+function zoomAround(z: number, mx: number, my: number) {
+    z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+    if (z === S.zoom) return;
+    const sc = document.getElementById('board-scroll');
+    const fx = sc ? (sc.scrollLeft + mx) / sc.scrollWidth : 0.5;
+    const fy = sc ? (sc.scrollTop + my) / sc.scrollHeight : 0.5;
+    S.zoom = z;
+    document.documentElement.style.setProperty('--cell-size', `${Math.round(baseCell() * z)}px`);
+    if (sc) {   // reading scrollWidth lays the board out at its new size
+        sc.scrollLeft = fx * sc.scrollWidth - mx;
+        sc.scrollTop = fy * sc.scrollHeight - my;
     }
 }
+
+// Pinch to zoom on touch screens; Ctrl/⌘ + wheel (a trackpad pinch) on desktop. The board's own `touch-action`
+// stops the browser zooming the whole page instead, and the pan/scroll of one finger is left alone.
+let pinch: { d0: number; z0: number } | null = null;
+const touchGap = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+const onBoard = (e: Event) => (e.target as HTMLElement).closest?.('.board-scroll') as HTMLElement | null;
+
+app.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2 && onBoard(e)) pinch = { d0: touchGap(e.touches) || 1, z0: S.zoom };
+}, { passive: true });
+app.addEventListener('touchmove', (e) => {
+    const sc = document.getElementById('board-scroll');
+    if (!pinch || !sc || e.touches.length !== 2) return;
+    e.preventDefault();
+    const r = sc.getBoundingClientRect();
+    zoomAround(pinch.z0 * touchGap(e.touches) / pinch.d0,
+        (e.touches[0].clientX + e.touches[1].clientX) / 2 - r.left, (e.touches[0].clientY + e.touches[1].clientY) / 2 - r.top);
+}, { passive: false });
+const endPinch = (e: TouchEvent) => { if (e.touches.length < 2) pinch = null; };
+app.addEventListener('touchend', endPinch);
+app.addEventListener('touchcancel', endPinch);
+app.addEventListener('wheel', (e) => {
+    const sc = onBoard(e);
+    if (!e.ctrlKey || !sc) return;
+    e.preventDefault();
+    const r = sc.getBoundingClientRect();
+    zoomAround(S.zoom * Math.exp(-e.deltaY * 0.01), e.clientX - r.left, e.clientY - r.top);
+}, { passive: false });
 
 // ─────────────────────────────────────────────
 // Events (delegated)
