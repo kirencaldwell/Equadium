@@ -345,3 +345,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .preview.bad { flex-direction: column; gap: 2px; padding: 6px 12px; }
 .preview.bad .eqs { font-family: var(--math); font-size: 17px; color: var(--ink); max-width: 100%; overflow-wrap: anywhere; }
 .preview.bad .why { font-size: 12.5px; }
+
+/* turn notifications */
+.icon.bell.on { color: var(--accent-ink); }
+.push-row { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 0 0 10px; }
+.push-row .ic { width: 20px; height: 20px; }
+.push-row small { color: var(--muted); margin-left: auto; }
+.push-row.on { border-color: var(--accent); }

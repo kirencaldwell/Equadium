@@ -9,3 +9,4 @@ python-dotenv==1.0.1
 PyJWT==2.8.0
 cryptography==42.0.5
 google-cloud-firestore==2.34.1
+pywebpush==2.0.3

@@ -15,6 +15,7 @@ import { api, me, room } from './api';
 import { ico } from './icons';
 import { authAvailable, initAuth, signInWithGoogle, signOut, takePendingRoom, type User } from './auth';
 import { equation, math, tileHtml } from './tiles';
+import { disablePush, enablePush, IOS_HINT, onNotificationOpen, pausePush, pushStatus, syncPush, type PushStatus } from './push';
 import { currentState, parseHash, pushModal, pushRoute, replaceRoute, sameRoute, type Route } from './nav';
 import type { GameState, Mode, Placed, Preview, SavedGame, Stats, Tile } from './types';
 
@@ -54,6 +55,7 @@ const S = {
     user: null as User | null,           // signed-in player (null = guest)
     saved: [] as SavedGame[],            // unfinished games to resume (signed-in only)
     stats: null as Stats | null,
+    push: null as PushStatus | null,     // turn notifications on this device (null until known / signed out)
     online: null as null | OnlineSeat,   // set while playing a remote game
     version: 0,                          // last server version seen (online polling)
     gameId: null as string | null,
@@ -357,13 +359,46 @@ async function checkSaving() {
     } catch { /* offline or not signed in on the server: nothing to report */ }
 }
 
+// ── Turn notifications ──────────────────────────────────────
+async function refreshPushStatus() {
+    S.push = S.user ? await pushStatus(S.user.id) : null;
+    if (S.screen === 'game' || S.modal === 'account') render();
+}
+
+/** Tap on the bell (in a game) or the switch in the account menu. */
+async function togglePush(fromBell: boolean) {
+    if (!S.user) return;
+    const st = S.push ?? await pushStatus(S.user.id);
+    try {
+        if (st === 'needs-install') showToast(IOS_HINT);
+        else if (st === 'blocked') showToast('Notifications are blocked for this site. Allow them in your browser settings, then try again.');
+        else if (st === 'unsupported') showToast("This browser can't show notifications.");
+        else if (st === 'unavailable') showToast('Notifications are not available right now.');
+        else if (st === 'off') { await enablePush(S.user.id); showToast("Notifications on. We'll tell you when it's your turn."); }
+        else if (fromBell) showToast('Notifications are on. You can turn them off in your account menu.');
+        else { await disablePush(); showToast('Notifications off.'); }
+    } catch (e) {
+        showToast((e as Error).message || "Couldn't change notifications.");
+    }
+    await refreshPushStatus();
+}
+
+/** A tapped notification asks the open page to switch to that game. */
+onNotificationOpen((code) => {
+    if (S.screen === 'game' && S.online?.code === code) { pollNow(); return; }
+    const route: Route = { screen: 'game', kind: 'room', code };
+    go(route);
+    void applyRoute(route).then(render);
+});
+
 function onUserChange(user: User | null) {
     const changed = user?.id !== S.user?.id;
     S.user = user;
     if (!changed) return;   // token refreshes also land here
     S.saved = [];
     S.stats = null;
-    if (user) void checkSaving();
+    S.push = null;
+    if (user) { void checkSaving(); void syncPush(user.id).then(refreshPushStatus); }
     void loadSavedGames();
     if (!user && S.screen === 'stats') { failToHome(); return; }
     if (S.screen !== 'game') render();
@@ -959,6 +994,13 @@ function updateDock() {
     document.querySelectorAll('.tile.pending').forEach(el => el.classList.toggle('ok', !!S.preview?.valid));
 }
 
+/** The notification bell, only in online games for signed-in players on a device that could use it. */
+function bellHtml(): string {
+    if (!S.online || !S.user || !S.push || S.push === 'unsupported' || S.push === 'unavailable') return '';
+    const on = S.push === 'on';
+    return `<button class="icon bell ${on ? 'on' : ''}" data-act="push-bell" aria-label="${on ? 'Notifications on' : 'Notify me on my turn'}" title="${on ? 'Notifications on' : 'Notify me when it is my turn'}">${ico(on ? 'bell-on' : 'bell')}</button>`;
+}
+
 function gameHtml(): string {
     const g = S.game!;
     if (S.online && !g.joined) return lobbyHtml(g);
@@ -968,6 +1010,7 @@ function gameHtml(): string {
             <button class="icon" data-act="home" aria-label="Menu">${ico('chevron-left')}</button>
             <span class="wordmark small">Equadium</span>
             <span class="bar-right">
+                ${bellHtml()}
                 ${canForfeit(g) ? `<button class="icon flag" data-act="forfeit" aria-label="Forfeit game" title="Forfeit">${ico('flag')}</button>` : ''}
                 <button class="icon calc" data-act="calc" aria-label="Derivative and integral table" title="Calculus cheat sheet">∫</button>
                 <button class="icon" data-act="help" aria-label="How to play">?</button>
@@ -1004,6 +1047,12 @@ function calcTableHtml(): string {
     const head = `<div class="ct-row ct-head"><span>f(x)</span><span>${math('d/dx(')}f)</span><span>${math('int(')}f) +C</span></div>`;
     const rows = CALC_ROWS.map(([f, d, i]) => `<div class="ct-row"><span>${math(f)}</span><span>${d.startsWith('\u2212<') ? d : math(d)}</span><span>${math(i)}</span></div>`).join('');
     return `<div class="ctable" role="table">${head}${rows}</div>`;
+}
+
+function pushRowHtml(): string {
+    if (!S.push || S.push === 'unsupported' || S.push === 'unavailable') return '';
+    const label = S.push === 'on' ? 'Turn notifications: on' : S.push === 'blocked' ? 'Notifications are blocked in your browser' : S.push === 'needs-install' ? 'Notifications need the Home Screen app' : 'Notify me when it is my turn';
+    return `<button class="ghost wide full push-row ${S.push === 'on' ? 'on' : ''}" data-act="push-toggle">${ico(S.push === 'on' ? 'bell-on' : 'bell')}<span>${label}</span>${S.push === 'on' ? '<small>Turn off</small>' : ''}</button>`;
 }
 
 function modalHtml(): string {
@@ -1073,6 +1122,7 @@ function modalHtml(): string {
             if (!u) break;
             body = `<div class="account-head">${avatarHtml(u)}<div><strong>${u.name}</strong><small>${u.email}</small></div></div>
             <p class="muted small">Your games and stats are saved to this account and follow you to any device.</p>
+            ${pushRowHtml()}
             <button class="primary" data-act="stats">View my stats</button>
             <button class="ghost wide full" data-act="signout">Sign out</button>`;
             break;
@@ -1147,7 +1197,9 @@ app.addEventListener('click', (e) => {
                     .then(() => showToast('Invite link copied'), () => showToast(`Share this code: ${S.online!.code}`));
                 break;
             case 'signin': void signInWithGoogle().catch(err => showToast((err as Error).message)); break;
-            case 'signout': closeModal(); void signOut(); break;
+            case 'push-bell': void togglePush(true); break;
+            case 'push-toggle': void togglePush(false); break;
+            case 'signout': closeModal(); void pausePush().finally(() => void signOut()); break;
             case 'account': openModal('account'); break;
             case 'stats': void openStats(); break;
             case 'resume-saved': { const g = S.saved[Number(actEl.dataset.i)]; if (g) void resumeSaved(g); break; }
@@ -1235,13 +1287,14 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') recallAll();
 });
 
+if (import.meta.env.DEV) Object.assign(window, { __equadium: { S, render } });   // lets the browser tests drive state the app can't reach without a Google sign-in
 render();
 
 // Boot: restore any saved sign-in, then work out where to start: an invite link (?room=CODE) wins, otherwise
 // the URL's route, so a reload (or following a link) lands where the user was.
 void (async () => {
     S.user = await initAuth(onUserChange);
-    if (S.user) { void checkSaving(); void loadSavedGames(); }
+    if (S.user) { void checkSaving(); void loadSavedGames(); void syncPush(S.user.id).then(refreshPushStatus); }
     const pending = takePendingRoom();   // an invite link survives the Google sign-in redirect
     if (pending && !new URLSearchParams(location.search).get('room')) history.replaceState(null, '', `${location.pathname}?room=${pending}#/online`);
 
@@ -1253,6 +1306,7 @@ void (async () => {
             ? { screen: 'game', kind: 'room', code: invite }
             : { screen: 'online' };        // not seated yet: the Online screen has the code pre-filled
     }
+    if (S.user && route.screen === 'game' && route.kind === 'room') await loadSavedGames();   // a notification tap lands here: know our seat first
     replaceRoute(route, route.screen === 'online' && !!invite);   // this is the first entry: adopt it, keep ?room= for the form
     await applyRoute(route);
     render();

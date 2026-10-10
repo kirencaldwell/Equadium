@@ -41,7 +41,7 @@ app = FastAPI()
 
 # The frontend (e.g. on Vercel) calls this API from another origin.
 # ALLOWED_ORIGINS is a comma-separated list, e.g. "https://equadium.vercel.app".
-from web.api import rooms, me  # noqa: E402  (after app setup is fine; no circular import)
+from web.api import rooms, me, push  # noqa: E402  (after app setup is fine; no circular import)
 from fastapi.responses import JSONResponse  # noqa: E402
 
 
@@ -73,6 +73,7 @@ app.add_middleware(
 
 app.include_router(rooms.router)
 app.include_router(me.router)
+app.include_router(push.router)
 
 sessions = {}  # game_id -> GameSession (in-memory cache; signed-in games are also saved to the store)
 _locks = {}    # game_id -> Lock, so two requests can't move the same game at once

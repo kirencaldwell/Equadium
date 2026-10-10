@@ -11,6 +11,7 @@ Game records are plain dicts:
   state (GameSession.to_dict()), summary, meta, user_ids, created_at, updated_at
 """
 import copy
+import hashlib
 import json
 import logging
 import os
@@ -41,6 +42,13 @@ class Store:
     def list_results(self, user_id: str, limit: int = 1000) -> List[dict]: raise NotImplementedError
     def upsert_profile(self, user_id: str, display_name: Optional[str], avatar_url: Optional[str]) -> None: raise NotImplementedError
     def get_profile(self, user_id: str) -> Optional[dict]: raise NotImplementedError
+    def save_push_subscription(self, user_id: str, sub: dict) -> None: raise NotImplementedError
+    def list_push_subscriptions(self, user_id: str) -> List[dict]: raise NotImplementedError
+    def delete_push_subscription(self, user_id: str, endpoint: str) -> None: raise NotImplementedError
+
+
+def push_sub_id(endpoint: str) -> str:
+    return hashlib.sha256(endpoint.encode()).hexdigest()
 
 
 class MemoryStore(Store):
@@ -51,6 +59,7 @@ class MemoryStore(Store):
         self._games: Dict[str, dict] = {}
         self._results: Dict[tuple, dict] = {}
         self._profiles: Dict[str, dict] = {}
+        self._push: Dict[str, dict] = {}
         self._lock = threading.Lock()
 
     def save_game(self, rec):
@@ -94,11 +103,25 @@ class MemoryStore(Store):
         with self._lock:
             return copy.deepcopy(self._profiles.get(user_id))
 
+    def save_push_subscription(self, user_id, sub):
+        with self._lock:
+            self._push[push_sub_id(sub["endpoint"])] = {**copy.deepcopy(sub), "user_id": user_id, "created_at": now_iso()}
+
+    def list_push_subscriptions(self, user_id):
+        with self._lock:
+            return copy.deepcopy([r for r in self._push.values() if r["user_id"] == user_id])
+
+    def delete_push_subscription(self, user_id, endpoint):
+        with self._lock:
+            rec = self._push.get(push_sub_id(endpoint))
+            if rec and rec["user_id"] == user_id:
+                del self._push[push_sub_id(endpoint)]
+
 
 class FirestoreStore(Store):
     """Google Cloud Firestore, accessed server-side with a service account (which bypasses security rules).
 
-    Collections: games/{id}, game_results/{game_id}__{user_id}, profiles/{user_id}.
+    Collections: games/{id}, game_results/{game_id}__{user_id}, profiles/{user_id}, push_subscriptions/{sha256(endpoint)}.
     Two Firestore quirks shape the layout:
       * arrays can't contain arrays, and the game snapshot does, so it is stored as a JSON string;
       * listing "my unfinished games" must not need a composite index, so each game carries
@@ -186,6 +209,21 @@ class FirestoreStore(Store):
     def get_profile(self, user_id):
         snap = self.db.collection("profiles").document(user_id).get(timeout=self.timeout)
         return snap.to_dict() if snap.exists else None
+
+    # -- push subscriptions: push_subscriptions/{sha256(endpoint)} ----------------
+    def save_push_subscription(self, user_id, sub):
+        self.db.collection("push_subscriptions").document(push_sub_id(sub["endpoint"])).set(
+            {**sub, "user_id": user_id, "created_at": now_iso()}, timeout=self.timeout)
+
+    def list_push_subscriptions(self, user_id):
+        query = self._where(self.db.collection("push_subscriptions"), "user_id", "==", user_id)
+        return [s.to_dict() for s in query.limit(20).stream(timeout=self.timeout)]
+
+    def delete_push_subscription(self, user_id, endpoint):
+        ref = self.db.collection("push_subscriptions").document(push_sub_id(endpoint))
+        snap = ref.get(timeout=self.timeout)
+        if snap.exists and snap.to_dict().get("user_id") == user_id:   # you can only remove your own
+            ref.delete(timeout=self.timeout)
 
 
 _store: Optional[Store] = None
