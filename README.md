@@ -172,3 +172,7 @@ header of `e2e/navigation.mjs`).
 ```
 pytest core web
 ```
+
+## License
+
+© 2026 Kiren Caldwell. All rights reserved (see `LICENSE`). The home screen shows the same notice.

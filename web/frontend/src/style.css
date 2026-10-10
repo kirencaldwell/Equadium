@@ -356,3 +356,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 }
 
 .push-test { display: block; margin: -2px auto 12px; font-size: 13px; }
+
+/* copyright notice at the foot of the home screen */
+.legal { margin-top: auto; padding-top: 28px; font-size: 12px; letter-spacing: .02em; color: var(--muted); opacity: .8; text-align: center; }
