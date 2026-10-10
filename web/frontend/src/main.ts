@@ -921,8 +921,7 @@ function boardHtml(g: GameState): string {
             const key = `${r},${c}`;
             const t = grid[r][c];
             const p = placedAt.get(key);
-            const adj = !t && !p && ((r > 0 && grid[r - 1][c]) || (r < height - 1 && grid[r + 1][c]) || (c > 0 && grid[r][c - 1]) || (c < width - 1 && grid[r][c + 1]));
-            const cls = ['cell', adj ? 'adj' : '', r === midR && c === midC ? 'start' : ''].join(' ');
+            const cls = ['cell', r === midR && c === midC ? 'start' : ''].join(' ');
             let inner = '';
             if (t) inner = tileHtml(t, `${lastCells.has(key) ? 'last' : ''} ${S.fresh.has(key) ? 'pop' : ''}`);
             else if (p) {

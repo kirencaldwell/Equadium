@@ -35,7 +35,8 @@ check('0 exactly one player is to move', (await turn(a)) !== (await turn(bb)));
 const centre = '.cell.start';
 await waiter.click('.rack .slot:not(.used)'); await waiter.waitForTimeout(150);
 check('1 a tile can be picked when it is not your turn', !!(await waiter.$('.rack .slot.selected')));
-const target = await waiter.evaluate(() => { const c = document.querySelector('.cell.adj'); return c ? `.cell[data-r="${c.dataset.r}"][data-c="${c.dataset.c}"]` : null; });
+// the square right of the centre tile
+const target = await waiter.evaluate(() => { const c = document.querySelector('.cell.start'); return `.cell[data-r="${c.dataset.r}"][data-c="${Number(c.dataset.c) + 1}"]`; });
 await waiter.click(target); await waiter.waitForTimeout(500);
 check('2 it can be placed on the board', !!(await waiter.$('.tile.pending')));
 check('3 the Play button stays disabled', await waiter.evaluate(() => document.querySelector('[data-act=play]').disabled));
