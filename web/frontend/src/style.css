@@ -366,3 +366,16 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .slot.reorder-target { transform: translateY(-4px); }
 .slot.reorder-target .tile { box-shadow: 0 0 0 2px var(--accent-hi), 0 2px 0 var(--t-num-edge); }
 .rack-ghost { position: fixed; z-index: 60; pointer-events: none; --ts: var(--rack-tile); filter: drop-shadow(0 8px 10px rgba(0, 0, 0, .35)); transition: none; }
+
+/* tiles already on the board that are part of the play being tried glow green like the pending ones */
+.tile.eq-ok { box-shadow: 0 2px 0 var(--t-num-edge), 0 0 0 3px var(--ring-ok), 0 0 14px rgba(111, 209, 166, .4); }
+
+/* the equation preview, spelled out tile by tile */
+.preview .eqs { display: block; line-height: 1.5; }
+.preview .eq { display: inline; }
+.preview .eq .term { display: inline-block; white-space: nowrap; }
+.preview .eq .op { display: inline-block; margin: 0 .4em; font-weight: 600; }
+.preview .eq .dot { font-style: normal; opacity: .5; margin: 0 .22em; }
+.preview .eqs .sep { display: block; height: 4px; }
+.actions .primary { white-space: nowrap; }
+@media (max-width: 480px) { .actions .primary { padding-inline: 8px; font-size: 16px; letter-spacing: .02em; } }

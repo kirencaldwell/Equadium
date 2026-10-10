@@ -192,6 +192,7 @@ class EquadiumGame:
         Dry-runs a play without changing any state. Returns
         (equations_data, None) if legal or (None, reason) if not.
         """
+        self.failed_tiles = None
         err = self.check_placement(move_tiles, direction)
         if err:
             return None, err
@@ -201,9 +202,10 @@ class EquadiumGame:
             equations_data = self.board.get_all_new_equations(move_tiles, direction)
             if not equations_data:
                 return None, "Play does not form any equation"
-            for eq_str, _ in equations_data:
+            for eq_str, eq_tiles in equations_data:
                 valid, msg = self.math.validate_equation(eq_str)
                 if not valid:
+                    self.failed_tiles = [t.symbol for t in eq_tiles]    # lets the UI show the failing line tile by tile
                     return None, f"'{eq_str}' is not a valid equation ({msg})"
         finally:
             self._rollback(move_tiles)

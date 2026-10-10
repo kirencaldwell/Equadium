@@ -261,6 +261,8 @@ def validate_move(code: str, move: MoveModel, x_player_token: Optional[str] = He
             "valid": error is None,
             "reason": error,
             "equations": [eq for eq, _ in equations] if equations else [],
+            "equation_tiles": [[t.symbol for t in tiles_] for _, tiles_ in equations] if equations else [],
+            "reason_tiles": room.session.game.failed_tiles,
             "score": room.session.game.score_play(equations, tiles) if equations else 0,
         }
 

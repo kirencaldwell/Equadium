@@ -230,6 +230,8 @@ def validate_move(game_id: str, move: MoveModel, user: Optional[AuthUser] = Depe
         "valid": error is None,
         "reason": error,
         "equations": [eq for eq, _ in equations] if equations else [],
+        "equation_tiles": [[t.symbol for t in tiles_] for _, tiles_ in equations] if equations else [],
+        "reason_tiles": session.game.failed_tiles,
         "score": session.game.score_play(equations, tiles) if equations else 0,
     }
 

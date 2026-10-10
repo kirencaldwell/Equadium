@@ -57,6 +57,8 @@ export interface Preview {
     valid: boolean;
     reason: string | null;
     equations: string[];
+    equation_tiles?: string[][];   // the same equations as lists of tile symbols
+    reason_tiles?: string[] | null; // the line that failed, as tile symbols
     score: number;
 }
 

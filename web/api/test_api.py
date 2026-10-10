@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from core.game_config import CONFIG
 from web.api.main import app
+from web.api import main
 
 client = TestClient(app)
 
@@ -151,3 +152,19 @@ def test_pass_and_play_forfeit_names_who_gave_up():
 def test_bots_cannot_forfeit():
     gid = create("agent_vs_agent")
     assert client.post(f"/games/{gid}/forfeit").status_code == 400
+
+
+def test_validate_move_reports_the_equation_tile_by_tile():
+    from core.game_config import CONFIG
+    gid = client.post("/games/create", json={"mode": "human_vs_human"}).json()["game_id"]
+    game = main.sessions[gid].game
+    from core.game_entities import make_tile
+    game.players[0].rack = [make_tile(sym, CONFIG) for sym in ("=", "x", "2", "x")]
+    r, c = CONFIG["board_dimensions"][0] // 2, CONFIG["board_dimensions"][1] // 2
+    t = lambda sym, pts: {"symbol": sym, "points": pts, "expr_multiplier": 1}
+    good = {"tiles_to_play": [{"r": r, "c": c + 1, "tile": t("=", 0)}, {"r": r, "c": c + 2, "tile": t("x", 1)}], "direction": "H"}
+    body = client.post(f"/games/{gid}/validate_move", json=good).json()
+    assert body["valid"] and body["equation_tiles"] == [["x", "=", "x"]] and body["reason_tiles"] is None
+    bad = {"tiles_to_play": [{"r": r, "c": c + 1, "tile": t("=", 0)}, {"r": r, "c": c + 2, "tile": t("2", 1)}], "direction": "H"}
+    body = client.post(f"/games/{gid}/validate_move", json=bad).json()
+    assert not body["valid"] and body["reason_tiles"] == ["x", "=", "2"] and body["equation_tiles"] == []
