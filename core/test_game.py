@@ -209,7 +209,11 @@ def test_calculus_inside_bigger_expressions(equation, expected):
     ("kx=3x", True),                   # k = 3
     ("k+k=3", True),                   # every k on the line is the same number
     ("kk=4", True),                    # k = 2
-    ("kk+kk=0", True),                 # k = 0
+    ("kk+kk=0", False),                # only k = 0 solves it, and k may not be 0
+    ("k1/33sin(x)=4k", False),         # k(sin(x) - 4) = 0 would need k = 0 (this slipped through once)
+    ("kx=ka", False),                  # likewise: x is not a
+    ("ksin(x)=4k", False),
+    ("kk=4k", True),                   # k = 4: a non-zero solution exists
     ("d/dx(kx)=k", True),              # true for every k
     ("int(k)=3x+C", True),             # k = 3
     ("int(k)=kx+C", True),
