@@ -157,6 +157,12 @@ On touch screens, pinch the board to zoom (the browser's own page zoom is disabl
 +/- buttons are hidden there and only shown for mouse users, who can also Ctrl/⌘ + scroll or pinch a trackpad. The target
 button recentres. `npm run e2e:pinch` drives a real two-finger pinch.
 
+## Rearranging the rack
+
+Drag a rack tile onto another to move it there (mouse: native drag and drop; touch: press and drag, a short drag so taps still select).
+Your arrangement is kept from turn to turn: tiles you still hold stay put and new ones are added at the end. Shuffle still
+shuffles. `npm run e2e:rack` covers mouse, touch and the kept arrangement.
+
 ## Browser Back / Forward
 
 Every screen has a URL (`#/online`, `#/stats`, `#/game/<id>`, `#/room/<CODE>`; the menu has none), so the browser's
