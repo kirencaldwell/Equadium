@@ -119,7 +119,7 @@ function direction(): 'H' | 'V' {
 function showToast(msg: string) {
     S.toast = msg;
     window.clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => { S.toast = ''; const t = document.getElementById('toast'); if (t) t.classList.remove('show'); }, 2600);
+    toastTimer = window.setTimeout(() => { S.toast = ''; const t = document.getElementById('toast'); if (t) t.classList.remove('show'); }, Math.max(2600, msg.length * 70));   // long messages stay up long enough to read
     const t = document.getElementById('toast');
     if (t) { t.textContent = msg; t.classList.add('show'); }
 }
