@@ -74,14 +74,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 
 /* ───────────── Tiles: ivory pieces, lightly engraved ───────────── */
 .tile {
-    --ts: var(--cell-size);
+    /* --ts (the tile's size unit) comes from where it sits: .cell (follows the zoom), .rack (fixed), .big, ... */
     position: relative; width: 100%; height: 100%;
     display: grid; place-items: center;
     border-radius: 8px;
     background: linear-gradient(180deg, var(--t-num-hi), var(--t-num));
     color: var(--t-ink);
     box-shadow: 0 2px 0 var(--t-num-edge), 0 3px 7px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .75), inset 0 0 0 1px rgba(255, 255, 255, .25);
-    font-family: var(--math); font-size: calc(var(--ts) * .56); line-height: 1;
+    font-family: var(--math); font-size: calc(var(--ts, 46px) * .56); line-height: 1;
     user-select: none;
 }
 .tile.op   { background: linear-gradient(180deg, var(--t-op-hi), var(--t-op));     box-shadow: 0 2px 0 var(--t-op-edge),   0 3px 7px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.6); }
@@ -103,8 +103,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .frac i:first-child { border-bottom: .09em solid currentColor; padding-bottom: .04em; }
 .frac i:last-child { padding-top: .06em; }
 .tile .pts, .tile .mult { position: absolute; font-family: var(--sans); font-weight: 600; font-style: normal; line-height: 1; }
-.tile .pts { right: 11%; bottom: 8%; font-size: calc(var(--ts) * .22); opacity: .6; }
-.tile .mult { right: 7%; top: 6%; font-size: calc(var(--ts) * .19); background: var(--t-ink); color: var(--t-num-hi); border-radius: 6px; padding: 2px 3px; letter-spacing: .02em; }
+.tile .pts { right: 11%; bottom: 8%; font-size: calc(var(--ts, 46px) * .22); opacity: .6; }
+.tile .mult { right: 7%; top: 6%; font-size: calc(var(--ts, 46px) * .19); background: var(--t-ink); color: var(--t-num-hi); border-radius: 6px; padding: 2px 3px; letter-spacing: .02em; }
 /* calculus tiles carry a ×2/×3 badge in the top corner: sit the symbol a little lower to make room */
 .tile.calc .face { transform: translateY(.2em); }
 .tile.big { --ts: 76px; }
