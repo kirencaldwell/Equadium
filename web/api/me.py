@@ -4,7 +4,7 @@ import time
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import HTTPException, APIRouter, Depends
 
 from web.api import persistence
 from web.api.auth import AuthUser, auth_enabled, require_user
@@ -41,8 +41,10 @@ def my_games(user: AuthUser = Depends(require_user)):
     try:
         recs = get_store().list_user_games(user.id)
     except Exception:
+        # Say so instead of answering "no games": an empty 200 made the app wipe the player's list on a
+        # transient storage hiccup (a cold start, a timeout), and the games only came back on a later fetch.
         logger.exception("Could not list games for %s", user.id)
-        return {"games": []}
+        raise HTTPException(status_code=503, detail="Couldn't load your saved games right now")
     games = []
     for rec in recs:
         if _age_days(rec["updated_at"]) > STALE_AFTER_DAYS:

@@ -298,11 +298,23 @@ async function openSolo(id: string, push = true) {
 // ─────────────────────────────────────────────
 // Accounts: saved games and stats
 // ─────────────────────────────────────────────
-async function loadSavedGames() {
+let savedSeq = 0;
+/**
+ * Refreshes the "Continue" list. Several things call this (showing the menu, finishing a game, signing in), so
+ * answers can arrive out of order: only the newest request may update the list. A failed request leaves the
+ * list as it was (never blank it) and is retried once shortly after.
+ */
+async function loadSavedGames(retry = true) {
     if (!S.user) { S.saved = []; return; }
+    const seq = ++savedSeq;
     try {
-        S.saved = (await me.games()).games;
-    } catch { /* offline or not signed in on the server: keep what we have */ }
+        const games = (await me.games()).games;
+        if (seq !== savedSeq) return;   // a newer request is in flight (or has already answered)
+        S.saved = games;
+    } catch {
+        if (retry) window.setTimeout(() => { if (S.screen === 'home') void loadSavedGames(false); }, 3000);
+        return;
+    }
     if (S.screen === 'home' && !S.modal) render();
 }
 

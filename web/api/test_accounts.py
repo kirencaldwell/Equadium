@@ -209,6 +209,19 @@ def test_signed_in_game_survives_restart_and_opens_anywhere():
     assert client.post(f"/games/{gid}/pass", headers=H()).json()["status"] == "success"
 
 
+def test_game_list_reports_a_storage_failure_instead_of_an_empty_list(env, monkeypatch):
+    gid = new_game(H())
+    assert [g["id"] for g in client.get("/me/games", headers=H()).json()["games"]] == [gid]
+
+    def boom(*a, **k):
+        raise RuntimeError("firestore timed out")
+    with monkeypatch.context() as m:
+        m.setattr(env, "list_user_games", boom)
+        r = client.get("/me/games", headers=H())
+    assert r.status_code == 503      # the app keeps the list it has; an empty 200 would blank the home screen
+    assert [g["id"] for g in client.get("/me/games", headers=H()).json()["games"]] == [gid]
+
+
 def test_saved_game_is_private_to_its_owner():
     gid = new_game(H())
     restart()
