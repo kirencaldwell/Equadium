@@ -181,6 +181,23 @@ def test_fingerprints_agree_with_engine():
     assert checked > 0
 
 
+# ---- the constant of integration: +C or -C ----
+@pytest.mark.parametrize("equation,expected", [
+    ("int(x)=1/2x**2+C", True),
+    ("int(x)=1/2x**2-C", True),                 # -C is just as good a constant
+    ("int(sin(x))=-cos(x)-C", True),
+    ("int(x)=1/2x**2-C=1/2x**2+C", True),       # in a chain too
+    ("int(x)=1/2x**2", False),                  # no constant at all
+    ("int(x)=1/2x**2+Cx", False),               # "Cx" is a product, not a constant term
+    ("int(1)=x+Cx", False),                     # ...so it can't be used to smuggle an extra x past the check
+    ("int(x)=1/2x**3-C", False),                # still has to be the right antiderivative
+    ("int(x)=C+1/2x**2", False),                # the constant is written as +C or -C after the function
+])
+def test_integral_constant(equation, expected):
+    ok, _ = fresh_session().game.math.validate_equation(equation)
+    assert ok is expected
+
+
 # ---- fraction tiles next to numbers/variables read as products of tiles ----
 @pytest.mark.parametrize("equation", [
     "2+21/xx=4", "2x1/x=2", "31/2=3/2", "x1/x=1",

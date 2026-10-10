@@ -109,15 +109,15 @@ class MathEngine:
         if not is_gram_valid:
             return False, f"Invalid grammar: {gram_msg}"
 
-        # Enforce +C rule using CONFIG
+        # An integral needs its constant of integration: "+C", or "-C" (the same family of antiderivatives).
         if "int(" in expr_str and self.config["require_plus_c"]:
-            if "+C" not in expr_str.replace(" ", ""):
-                return False, "Missing constant of integration (+C)"
+            if not self._CONSTANT.search(expr_str.replace(" ", "")):
+                return False, "Missing constant of integration (+C or -C)"
 
         try:
             # Every part of a chain (a = b = c) must equal the first one.
-            # Clean up spacing and strip "+C" safely for evaluation.
-            parts = [p.replace("+C", "").replace("+ C", "").strip() for p in expr_str.split("=")]
+            # Strip the constant of integration, then compare.
+            parts = [self._CONSTANT.sub("", p.replace(" ", "")) for p in expr_str.split("=")]
             first = self._parse_expression(parts[0])
             for part in parts[1:]:
                 if sp.simplify(first - self._parse_expression(part)) != 0:
@@ -140,6 +140,8 @@ class MathEngine:
                     return i == len(expr_str) - 1
         return False
 
+    # "+C" / "-C" as a term of its own: not "+Cx" (a product) or "+C(" (a call)
+    _CONSTANT = re.compile(r"[+-]C(?![A-Za-z0-9(*^])")
     _FRACTION_TILE = re.compile(r"^\d/[\dx]$")
     _NUMBER_TILE = re.compile(r"^\d+$")
     # Tokens that are a value on their own (a term to multiply), as opposed to operators and openers.

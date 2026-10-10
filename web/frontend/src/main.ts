@@ -1099,7 +1099,7 @@ function modalHtml(): string {
             <ul class="rules calc-rules">
                 <li><b>Constants</b> pull out: <span class="eg">${equation('d/dx(2x**2)=4x')}</span></li>
                 <li><b>Sums</b> go term by term: <span class="eg">${equation('d/dx(x**2+x)=2x+1')}</span></li>
-                <li>Every integral needs <span class="eg">+C</span>.</li>
+                <li>Every integral needs <span class="eg">+C</span> (or <span class="eg">−C</span>).</li>
             </ul>
             <button class="primary" data-act="close">Close</button>`;
             break;
