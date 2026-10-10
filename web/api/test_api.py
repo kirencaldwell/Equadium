@@ -47,8 +47,13 @@ def test_unknown_mode_rejected():
     assert client.post("/games/create", json={"mode": "nope"}).status_code == 400
 
 
+def test_pass_and_play_no_longer_exists():
+    r = client.post("/games/create", json={"mode": "human_vs_human"})
+    assert r.status_code == 400 and "online" in r.json()["detail"]
+
+
 def test_modes_listed():
-    assert set(client.get("/modes").json()) == {"human_vs_agent", "human_vs_human", "agent_vs_agent"}
+    assert set(client.get("/modes").json()) == {"human_vs_agent", "agent_vs_agent"}   # two-player games are online rooms
 
 
 def test_human_vs_agent_play_then_agent_replies():
@@ -82,25 +87,8 @@ def test_validate_move_reports_reason():
     assert ok["valid"] is True
 
 
-def test_human_vs_human_two_players_alternate():
-    gid = create("human_vs_human")
-    rig_rack(gid, 0, ["=", "x"])
-    state = client.get(f"/games/{gid}").json()
-    assert state["seats"] == {"Player1": "human", "Player2": "human"}
-    # Player2 can't move first
-    assert client.post(f"/games/{gid}/pass", params={"player": "Player2"}).status_code == 400
-    r = client.post(f"/games/{gid}/play", params={"player": "Player1"}, json=equals_x_play())
-    assert r.json()["status"] == "success" and r.json()["agent_moves"] == []
-    assert client.get(f"/games/{gid}").json()["current_player"] == "Player2"
-    assert client.post(f"/games/{gid}/pass", params={"player": "Player2"}).json()["status"] == "success"
-    assert client.get(f"/games/{gid}").json()["current_player"] == "Player1"
 
 
-def test_swap_in_human_vs_human_hot_seat():
-    gid = create("human_vs_human")
-    r = client.post(f"/games/{gid}/swap", params={"player": "Player1"}, json={"tile_indices": [0, 1, 2]})
-    assert r.json()["status"] == "success"
-    assert client.get(f"/games/{gid}").json()["current_player"] == "Player2"
 
 
 def test_agent_vs_agent_step_and_autoplay(monkeypatch):
@@ -142,11 +130,6 @@ def test_no_moves_or_second_forfeit_after_forfeiting():
     assert client.post(f"/games/{gid}/play", json=equals_x_play()).status_code == 400
 
 
-def test_pass_and_play_forfeit_names_who_gave_up():
-    gid = create("human_vs_human")
-    client.post(f"/games/{gid}/forfeit", params={"player": "Player2"})       # not their turn, still allowed
-    state = client.get(f"/games/{gid}").json()
-    assert state["forfeited_by"] == "Player2" and state["winners"] == ["Player1"]
 
 
 def test_bots_cannot_forfeit():
@@ -156,7 +139,7 @@ def test_bots_cannot_forfeit():
 
 def test_validate_move_reports_the_equation_tile_by_tile():
     from core.game_config import CONFIG
-    gid = client.post("/games/create", json={"mode": "human_vs_human"}).json()["game_id"]
+    gid = client.post("/games/create", json={"mode": "human_vs_agent"}).json()["game_id"]
     game = main.sessions[gid].game
     from core.game_entities import make_tile
     game.players[0].rack = [make_tile(sym, CONFIG) for sym in ("=", "x", "2", "x")]

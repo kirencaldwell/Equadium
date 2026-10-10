@@ -12,7 +12,7 @@ const check = (name, ok, extra = '') => { (ok ? pass++ : fail++); console.log(`$
 const pg = await (await b.newContext({ viewport: { width: 390, height: 800 } })).newPage();
 pg.on('pageerror', e => errs.push(e.message));
 await pg.goto(`${BASE}/`); await pg.waitForSelector('.home .modes');
-await pg.click('[data-mode=human_vs_human]'); await pg.waitForSelector('.board'); await pg.waitForTimeout(300);
+await pg.click('[data-mode=human_vs_agent]'); await pg.waitForSelector('.board'); await pg.waitForTimeout(300);
 const status = () => pg.evaluate(() => document.getElementById('status').textContent.replace(/\s+/g, ' ').trim());
 check('1 normally there is no final-turn message', !/final turn/i.test(await status()), await status());
 await pg.evaluate(() => { const { S, render } = window.__equadium; S.game.final_turn = true; render(); });

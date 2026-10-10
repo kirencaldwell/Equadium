@@ -101,13 +101,10 @@ check('H2 Back after reload reaches the menu', await onHome(pg));
 
 // ── I: game over -> Play again replaces the finished game in history
 pg = await newPage();
-await pg.click('[data-mode=human_vs_human]'); await pg.waitForSelector('.board');
+await pg.click('[data-mode=human_vs_agent]'); await pg.waitForSelector('.board');
 const firstGame = await hash(pg);
-for (let i = 0; i < 6; i++) {
-  await pg.click('[data-act=pass]'); await pg.click('[data-act=pass-confirm]'); await settle(pg);
-  if (await pg.$('.modal.over')) break;
-  await pg.click('.modal [data-act=close]'); await settle(pg);
-}
+await pg.click('.bar [data-act=forfeit]'); await pg.waitForSelector('.modal.forfeit');      // the quickest way to end a game
+await pg.click('[data-act=forfeit-confirm]');
 await pg.waitForSelector('.modal.over');
 await pg.click('.modal [data-act=start]'); await pg.waitForSelector('.board'); await settle(pg);
 const secondGame = await hash(pg);

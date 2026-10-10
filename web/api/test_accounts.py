@@ -299,12 +299,6 @@ def test_storage_outage_never_breaks_a_move(env):
     assert client.post(f"/games/{gid}/pass", headers=H()).json()["status"] == "success"
 
 
-def test_pass_and_play_is_saved_but_not_counted(monkeypatch):
-    monkeypatch.setitem(CONFIG, "max_turns", 2)
-    gid = new_game(H(), mode="human_vs_human")
-    client.post(f"/games/{gid}/pass", params={"player": "Player1"}, headers=H())
-    client.post(f"/games/{gid}/pass", params={"player": "Player2"}, headers=H())
-    assert client.get("/me/stats", headers=H()).json()["games"] == 0
 
 
 def test_compute_stats():
@@ -608,10 +602,6 @@ def test_forfeit_survives_a_restart():
     assert client.get("/me/stats", headers=H()).json()["games"] == 1   # still counted exactly once
 
 
-def test_pass_and_play_forfeit_does_not_touch_stats():
-    gid = new_game(H(), mode="human_vs_human")
-    client.post(f"/games/{gid}/forfeit", params={"player": "Player1"}, headers=H())
-    assert client.get("/me/stats", headers=H()).json()["games"] == 0
 
 
 def test_online_forfeit_gives_the_win_to_the_opponent_on_either_turn():
@@ -850,3 +840,12 @@ def test_misconfigured_vapid_keys_are_named_by_the_test_button(monkeypatch):
     client.post("/push/subscribe", json=sub_body(), headers=H())      # the last combination above: mismatched pair
     r = client.post("/push/test", headers=H())
     assert r.status_code == 503 and "doesn't match" in r.json()["detail"]
+
+
+def test_old_pass_and_play_games_are_hidden_from_the_continue_list(env):
+    keep = new_game(H(), mode="human_vs_agent")
+    old = game_rec("old-hotseat", [ALICE])
+    old["mode"] = "human_vs_human"                       # saved before Pass & Play was removed
+    env.save_game(old)
+    ids = [g["id"] for g in client.get("/me/games", headers=H()).json()["games"]]
+    assert keep in ids and "old-hotseat" not in ids
