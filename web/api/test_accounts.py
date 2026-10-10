@@ -764,3 +764,16 @@ def test_store_contract_push_subscriptions(any_store):
     assert len(any_store.list_push_subscriptions(ALICE)) == 1
     any_store.delete_push_subscription(ALICE, FCM)
     assert any_store.list_push_subscriptions(ALICE) == []
+
+
+def test_generated_vapid_keys_have_the_format_web_push_expects():
+    import base64
+    from web.api.make_vapid_keys import make_keys
+    pub, priv = make_keys()
+    pad = lambda v: v + "=" * (-len(v) % 4)
+    assert len(base64.urlsafe_b64decode(pad(pub))) == 65 and base64.urlsafe_b64decode(pad(pub))[0] == 4   # uncompressed P-256 point
+    assert len(base64.urlsafe_b64decode(pad(priv))) == 32
+    assert make_keys() != (pub, priv)
+    # and pywebpush accepts them for signing
+    from py_vapid import Vapid
+    assert Vapid.from_string(priv).public_key.public_numbers() is not None
