@@ -62,7 +62,8 @@ const S = {
     game: null as GameState | null,
     placed: [] as Placed[],
     selected: null as Selection,
-    rackOrder: [] as number[],
+    rackOrder: [] as number[],           // rack indices in the order they are shown
+    rackSyms: [] as string[],            // the same order as tile symbols, so your arrangement survives drawing new tiles
     preview: null as Preview | null,
     busy: null as null | 'submitting' | 'thinking',
     modal: null as null | 'help' | 'calc' | 'swap' | 'pass' | 'forfeit' | 'handoff' | 'over' | 'account',
@@ -129,7 +130,16 @@ function resetTurnState() {
     S.selected = null;
     S.preview = null;
     S.swapPick.clear();
-    S.rackOrder = myRack().map((_, i) => i);
+    // keep the arrangement the player made: tiles they still hold stay where they were, new tiles go on the end
+    const rack = myRack();
+    const pool = rack.map((t, i) => ({ s: t.symbol, i }));
+    const order: number[] = [];
+    for (const sym of S.rackSyms) {
+        const k = pool.findIndex(p => p.s === sym);
+        if (k >= 0) order.push(pool.splice(k, 1)[0].i);
+    }
+    S.rackOrder = [...order, ...pool.map(p => p.i)];
+    syncRackSyms();
     previewToken++;
 }
 
@@ -173,7 +183,25 @@ function closeModal() {
     render();
 }
 
+function syncRackSyms() {
+    const rack = myRack();
+    S.rackSyms = S.rackOrder.filter(i => i < rack.length).map(i => rack[i].symbol);
+}
+
+/** Moves rack tile `fromI` to where rack tile `toI` is now (indices into the rack, not screen positions). */
+function moveRackTile(fromI: number, toI: number) {
+    const o = S.rackOrder;
+    const a = o.indexOf(fromI), b = o.indexOf(toI);
+    if (a < 0 || b < 0 || a === b) return;
+    o.splice(a, 1);
+    o.splice(b, 0, fromI);
+    S.selected = null;
+    syncRackSyms();
+    render();
+}
+
 function leaveGame() {
+    S.rackSyms = [];
     stopWatching();
     stopPolling();
     S.online = null;
@@ -1284,7 +1312,7 @@ app.addEventListener('click', (e) => {
             case 'shuffle': {
                 const o = [...S.rackOrder];
                 for (let i = o.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [o[i], o[j]] = [o[j], o[i]]; }
-                S.rackOrder = o; render(); break;
+                S.rackOrder = o; syncRackSyms(); render(); break;
             }
             case 'recall': recallAll(); break;
             case 'play': if (S.online) offerPush(); void play(); break;
@@ -1337,12 +1365,64 @@ app.addEventListener('dragstart', (e) => {
     e.dataTransfer?.setData('text/plain', 'tile');
 });
 app.addEventListener('dragover', (e) => { if ((e.target as HTMLElement).closest('.cell[data-drop]')) e.preventDefault(); });
+const rackSlotAt = (el: EventTarget | null) => (el as HTMLElement | null)?.closest?.('.rack:not(.swap) .slot[data-i]') as HTMLElement | null;
+app.addEventListener('dragover', (e) => { if (S.selected?.kind === 'rack' && rackSlotAt(e.target)) e.preventDefault(); });
 app.addEventListener('drop', (e) => {
+    const slot = rackSlotAt(e.target);
+    if (slot && S.selected?.kind === 'rack') {      // dropped on another rack tile: reorder the rack
+        e.preventDefault();
+        moveRackTile(S.selected.index, Number(slot.dataset.i));
+        return;
+    }
     const cell = (e.target as HTMLElement).closest('.cell[data-drop]') as HTMLElement | null;
     if (!cell) return;
     e.preventDefault();
     placeSelectedAt(Number(cell.dataset.r), Number(cell.dataset.c));
 });
+
+// Reordering the rack by touch: press a tile and drag it onto another one (a short drag, so taps still select).
+// Mouse users do the same with the native drag and drop above.
+let rackDrag: { id: number; i: number; x0: number; y0: number; el: HTMLElement; ghost: HTMLElement | null; over: HTMLElement | null } | null = null;
+let suppressClickUntil = 0;
+app.addEventListener('pointerdown', (e) => {
+    const slot = rackSlotAt(e.target);
+    if (e.pointerType === 'mouse' || !slot || slot.classList.contains('used')) return;
+    rackDrag = { id: e.pointerId, i: Number(slot.dataset.i), x0: e.clientX, y0: e.clientY, el: slot, ghost: null, over: null };
+});
+document.addEventListener('pointermove', (e) => {
+    const d = rackDrag;
+    if (!d || e.pointerId !== d.id) return;
+    if (!d.ghost) {
+        if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 10) return;
+        const r = d.el.getBoundingClientRect();
+        d.ghost = d.el.cloneNode(true) as HTMLElement;
+        d.ghost.classList.add('rack-ghost');
+        Object.assign(d.ghost.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+        document.body.appendChild(d.ghost);
+        d.el.classList.add('lifted');
+        try { d.el.setPointerCapture(d.id); } catch { /* the drag still works without capture */ }
+    }
+    d.ghost.style.transform = `translate(${e.clientX - d.x0}px, ${e.clientY - d.y0}px) scale(1.12)`;
+    const over = rackSlotAt(document.elementFromPoint(e.clientX, e.clientY));
+    const target = over && over !== d.el ? over : null;
+    if (target !== d.over) { d.over?.classList.remove('reorder-target'); target?.classList.add('reorder-target'); d.over = target; }
+});
+const endRackDrag = (e: PointerEvent, cancelled: boolean) => {
+    const d = rackDrag;
+    if (!d || e.pointerId !== d.id) return;
+    rackDrag = null;
+    if (!d.ghost) return;                                   // never became a drag: it was a tap
+    d.ghost.remove();
+    d.el.classList.remove('lifted');
+    d.over?.classList.remove('reorder-target');
+    suppressClickUntil = Date.now() + 150;                  // the finger lifting is not a tap on whatever is underneath
+    if (!cancelled && d.over) moveRackTile(d.i, Number(d.over.dataset.i));
+};
+document.addEventListener('pointerup', (e) => endRackDrag(e, false));
+document.addEventListener('pointercancel', (e) => endRackDrag(e, true));
+app.addEventListener('click', (e) => {
+    if (Date.now() < suppressClickUntil) { suppressClickUntil = 0; e.stopImmediatePropagation(); e.preventDefault(); }
+}, true);
 
 document.addEventListener('keydown', (e) => {
     if (S.screen !== 'game' || S.modal) return;
