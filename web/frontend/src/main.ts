@@ -15,7 +15,7 @@ import { api, me, room } from './api';
 import { ico } from './icons';
 import { authAvailable, initAuth, signInWithGoogle, signOut, takePendingRoom, type User } from './auth';
 import { equation, math, tileHtml } from './tiles';
-import { disablePush, enablePush, IOS_HINT, onNotificationOpen, pausePush, pushStatus, syncPush, type PushStatus } from './push';
+import { autoEnablePush, disablePush, enablePush, IOS_HINT, onNotificationOpen, pausePush, pushStatus, syncPush, type PushStatus } from './push';
 import { currentState, parseHash, pushModal, pushRoute, replaceRoute, sameRoute, type Route } from './nav';
 import type { GameState, Mode, Placed, Preview, SavedGame, Stats, Tile } from './types';
 
@@ -381,6 +381,15 @@ async function togglePush(fromBell: boolean) {
         showToast((e as Error).message || "Couldn't change notifications.");
     }
     await refreshPushStatus();
+}
+
+/** Default-on: the first online tap (start, join, play) is where the browser's permission prompt appears. */
+function offerPush() {
+    if (!S.user || S.push !== 'off') return;
+    void autoEnablePush(S.user.id).then(async (nowOn) => {
+        await refreshPushStatus();
+        if (nowOn) showToast("Notifications on. We'll tell you when it's your turn. Change this from the bell.");
+    });
 }
 
 /** A tapped notification asks the open page to switch to that game. */
@@ -1189,8 +1198,8 @@ app.addEventListener('click', (e) => {
         switch (act) {
             case 'start': void startGame((actEl.dataset.mode as Mode)); break;
             case 'online': showOnline(); break;
-            case 'online-create': void createOnline(); break;
-            case 'online-join': void joinOnline((document.getElementById('code') as HTMLInputElement).value); break;
+            case 'online-create': offerPush(); void createOnline(); break;
+            case 'online-join': offerPush(); void joinOnline((document.getElementById('code') as HTMLInputElement).value); break;
             case 'online-resume': { const saved = loadSaved(); if (saved) void enterRoom(saved).catch(err => showToast((err as Error).message)); break; }
             case 'copy-link':
                 void navigator.clipboard?.writeText(joinLink(S.online!.code))
@@ -1224,18 +1233,18 @@ app.addEventListener('click', (e) => {
                 S.rackOrder = o; render(); break;
             }
             case 'recall': recallAll(); break;
-            case 'play': void play(); break;
+            case 'play': if (S.online) offerPush(); void play(); break;
             case 'swap': S.swapPick.clear(); openModal('swap'); break;
             case 'swap-pick': {
                 const i = Number(actEl.dataset.i);
                 if (S.swapPick.has(i)) S.swapPick.delete(i); else S.swapPick.add(i);
                 render(); break;
             }
-            case 'swap-confirm': closeModal(); void swap(); break;
+            case 'swap-confirm': if (S.online) offerPush(); closeModal(); void swap(); break;
             case 'pass': openModal('pass'); break;
             case 'forfeit': openModal('forfeit'); break;
             case 'forfeit-confirm': closeModal(); void forfeit(); break;
-            case 'pass-confirm': closeModal(); void pass(); break;
+            case 'pass-confirm': if (S.online) offerPush(); closeModal(); void pass(); break;
             case 'zoom-in': setZoom(S.zoom + 0.15); break;
             case 'zoom-out': setZoom(S.zoom - 0.15); break;
             case 'center': centerBoard(); break;
@@ -1287,7 +1296,7 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') recallAll();
 });
 
-if (import.meta.env.DEV) Object.assign(window, { __equadium: { S, render } });   // lets the browser tests drive state the app can't reach without a Google sign-in
+if (import.meta.env.DEV) Object.assign(window, { __equadium: { S, render, refreshPushStatus } });   // lets the browser tests drive state the app can't reach without a Google sign-in
 render();
 
 // Boot: restore any saved sign-in, then work out where to start: an invite link (?room=CODE) wins, otherwise
