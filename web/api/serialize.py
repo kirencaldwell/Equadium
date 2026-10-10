@@ -42,6 +42,7 @@ def game_to_model(session):
         "winners": game.winners if game.is_game_over else [],
         "turns_played": game.turns_played,
         "bag_count": len(game.tile_bag),
+        "final_turn": game.final_turn_count is not None and not game.is_game_over,   # the last tile has been drawn
         "last_move": session.history[-1].__dict__ if session.history else None,
     }
 

@@ -116,6 +116,15 @@ precomputed table (`core/math_playbook.py`, kept as a baseline: it grows as tile
 table takes many minutes to build). It enumerates what the rack can spell, fingerprints each expression
 numerically, and joins equal fingerprints (meet in the middle); SymPy only verifies the final candidates.
 
+## How a game ends
+
+The game ends when the **last tile is drawn from the bag**: the player who drew it has had their turn, and the other player
+gets one final "rebuttal" turn (a play, a swap or a pass), after which scores are final and the higher score wins (equal
+scores tie). There is no bonus or penalty for tiles left in a rack. Two safety nets remain: three full rounds with nobody
+playing ("stalled") and a 75-turn limit. A forfeit ends the game at once (see below). The app says "Last tile drawn · …
+final turn" once the countdown starts. Games saved before this rule whose bag is already empty simply give each player one
+more turn. `npm run e2e:endgame` checks the messages.
+
 ## Forfeiting
 
 The flag in the game header lets a player give up (after a confirmation). It ends the game at once as a **loss for

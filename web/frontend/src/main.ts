@@ -930,11 +930,20 @@ function statusText(g: GameState): string {
         : g.mode === 'agent_vs_agent'
         ? `${display(g.current_player)} to move`
         : g.current_player === actingPlayer() ? (g.mode === 'human_vs_human' ? `${display(g.current_player)}'s turn` : 'Your turn') : '';
+    // once the last tile is drawn, the other player gets one final turn
+    let final = base;
+    if (g.final_turn) {
+        const mine = S.online ? g.current_player === S.online.seat : g.mode !== 'agent_vs_agent' && g.current_player === actingPlayer() && g.mode === 'human_vs_agent';
+        const who = display(g.current_player);
+        final = mine ? 'Last tile drawn · your final turn'
+            : S.online ? `Last tile drawn · waiting for ${who}'s final turn…`
+            : `Last tile drawn · ${who}'s final turn`;
+    }
     if (lm && lm.ok && S.placed.length === 0) {
         const last = describeMove(lm.player, lm.action, lm.tiles?.length ?? 0, lm.score_delta);
-        return base ? `${last} · ${base}` : last;
+        return final ? `${last} · ${final}` : last;
     }
-    return base;
+    return final;
 }
 
 /** Every square of the rows and columns the pending tiles make equations of, existing tiles included. */
@@ -1138,7 +1147,7 @@ function modalHtml(): string {
                 <li>You get <b>one free <span class="eg">=</span></b> each turn.</li>
                 <li><span class="eg">k</span> is <b>whatever constant you need it to be</b> (but never 0), and worth 0 points: <span class="eg">${equation('2k=3')}</span> works.</li>
                 <li><span class="eg">${equation('d/dx(')}</span> and <span class="eg">${equation('int(')}</span> tiles multiply your score by <b>×2</b> and <b>×3</b>. An integral needs <span class="eg">+C</span> (or <span class="eg">−C</span>). Stack two <span class="eg">${equation('d/dx(')}</span> tiles for a second derivative and <b>×4</b>. They can sit inside bigger expressions too: <span class="eg">${equation('d/dx(x**2)+x=3x')}</span>.</li>
-                <li>The game ends when someone runs out of tiles, or nobody can play.</li>
+                <li>The game ends when the <b>last tile is drawn</b>: the other player gets one final turn to answer, then scores are final.</li>
             </ol>
             <button class="primary" data-act="close">Got it</button>`;
             break;
@@ -1183,7 +1192,7 @@ function modalHtml(): string {
             const gaveUp = g.end_reason === 'forfeit' ? g.forfeited_by : null;
             const headline = gaveUp ? (me ? (gaveUp === me ? 'You forfeited' : `${display(gaveUp)} forfeited. You win!`) : `${display(gaveUp)} forfeited`)
                 : tie ? "It's a tie" : me ? (g.winners[0] === me ? 'You win!' : `${S.online ? display(g.winners[0]) : 'Computer'} wins`) : `${display(g.winners[0])} wins`;
-            const why: Record<string, string> = { 'rack empty': 'Someone used every tile.', stalled: 'Nobody could play.', 'bag empty+stuck': 'The bag ran out and nobody could play.', 'turn limit': 'Turn limit reached.', forfeit: me && gaveUp === me ? 'That counts as a loss.' : 'The game ended by forfeit.' };
+            const why: Record<string, string> = { 'last tile drawn': 'The last tile was drawn and the final turn has been played.', 'rack empty': 'Someone used every tile.', stalled: 'Nobody could play.', 'bag empty+stuck': 'The bag ran out and nobody could play.', 'turn limit': 'Turn limit reached.', forfeit: me && gaveUp === me ? 'That counts as a loss.' : 'The game ended by forfeit.' };
             body = `<h2>${headline}</h2><p class="muted">${why[g.end_reason ?? ''] ?? ''}${S.user && (S.online || g.mode === 'human_vs_agent') ? ' Added to your stats.' : ''}</p>
             <div class="final">${[...g.players].sort((a, b) => b.score - a.score).map(p => `<div class="${g.winners.includes(p.name) ? 'win' : ''}"><span>${display(p.name)}</span><strong>${p.score}</strong></div>`).join('')}</div>
             <div class="modal-actions"><button class="ghost wide" data-act="home">Menu</button>${S.online ? '<button class="primary" data-act="online">New online game</button>' : `<button class="primary" data-act="start" data-mode="${g.mode}">Play again</button>`}</div>`;
