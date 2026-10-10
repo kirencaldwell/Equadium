@@ -231,7 +231,8 @@ def test_integral_constant(equation, expected):
 @pytest.mark.parametrize("equation", [
     "2+21/xx=4", "2x1/x=2", "31/2=3/2", "x1/x=1",
     "xx**3=x**421/2",       # a power tile followed by a digit tile is a product, not a bigger exponent
-    "x2=2x", "kx**22=2kx**2", "a2=2a", "23=23",
+    "x2=2x", "kx**22=2kx**2", "a2=2a",
+    "22=4", "23=6", "4e^x=22e^x",     # digit tiles multiply: 2, 2 is 2*2, not twenty-two
 ])
 def test_fraction_tile_is_its_own_factor(equation):
     ok, msg = fresh_session().game.math.validate_equation(equation)
@@ -395,7 +396,9 @@ def test_blacklist_is_computed_once_and_shared_between_agents():
     SearchAgent("a", CONFIG)._adjacency_blacklist(s.game)          # warms the shared cache (or loads from file)
     start = time.time()
     second = SearchAgent("b", CONFIG)
-    assert second._adjacency_blacklist(s.game)
+    # Every pair of adjacent tiles now reads as the product of the two (digits included), which is what the agent
+    # assumes, so no pair needs blacklisting any more.
+    assert second._adjacency_blacklist(s.game) == set()
     assert time.time() - start < 0.5                                  # a brand-new agent/game does not recompute
 
 
