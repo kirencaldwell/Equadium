@@ -181,6 +181,35 @@ def test_fingerprints_agree_with_engine():
     assert checked > 0
 
 
+# ---- k, the wild constant ----
+@pytest.mark.parametrize("equation,expected", [
+    ("2k=3", True),                    # k = 3/2
+    ("kx=3x", True),                   # k = 3
+    ("k+k=3", True),                   # every k on the line is the same number
+    ("kk=4", True),                    # k = 2
+    ("kk+kk=0", True),                 # k = 0
+    ("d/dx(kx)=k", True),              # true for every k
+    ("int(k)=3x+C", True),             # k = 3
+    ("int(k)=kx+C", True),
+    ("2k=3=k+k", True),                # a chain needs one k that satisfies every link...
+    ("2k=3=4", False),                 # ...and 3 = 4 is false whatever k is
+    ("k=3=2k", False),                 # k = 3 for the first link, but then 2k = 6
+    ("k=x", False),                    # no constant equals x
+    ("kx=3", False),                   # k would have to be 3/x
+    ("k=a", False),                    # nor may it depend on a or b
+    ("kk+4=0", False),                 # only complex numbers solve it: k must be real
+    ("x=x", True),
+    ("x=2x", False),                   # ordinary equations are unchanged
+])
+def test_k_is_a_wild_constant(equation, expected):
+    ok, _ = fresh_session().game.math.validate_equation(equation)
+    assert ok is expected, equation
+
+
+def test_k_is_worth_nothing():
+    assert CONFIG["tiles"]["k"]["points"] == 0
+
+
 # ---- the constant of integration: +C or -C ----
 @pytest.mark.parametrize("equation,expected", [
     ("int(x)=1/2x**2+C", True),
