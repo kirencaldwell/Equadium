@@ -75,18 +75,27 @@ Without `FIRESTORE_EMULATOR_HOST` the emulator tests are skipped and the store i
 
 ## Turn notifications
 
-Signed-in players can get a push notification when the other player moves in an online game: tap the bell in the
-game bar (or "Notify me when it is my turn" in the account menu). It uses standard Web Push, so there is no extra
-service to sign up for.
+Notifications are **on by default** for signed-in players: when the other player moves in an online game they get a push
+notification ("Ann played for 12 points. Your turn!"). The first time someone starts, joins or plays in an online game on a
+device, the browser's own permission prompt appears, and their answer there decides whether notifications arrive; a "no"
+(or a dismissed prompt) is never nagged about again. Where the browser has already allowed notifications, a device is
+registered silently on sign-in. The bell in the game bar (or "Notify me when it is my turn" in the account menu) is the
+opt-out and opt-back-in. It uses standard Web Push, so there is no extra service to sign up for.
 
 Server setup (once): run `python -m web.api.make_vapid_keys`, then set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and
 `VAPID_SUBJECT` (a `mailto:` address) on the API server (Render) and redeploy. Without them the feature is off and the
 bell is hidden. Subscriptions are stored in Firestore (`push_subscriptions`), so with the in-memory store they are lost on
 restart.
 
+If notifications don't arrive: turn them on, open the account menu and tap **Send me a test notification**: it goes through the
+real server and says what happened (no device registered, the push service refused it, ...). The Render logs also say
+`Push sent to ...`, `Push failed ...` or `Push skipped: VAPID keys are not set` for every move. Check that `VAPID_SUBJECT` is just
+`mailto:you@yourdomain.com` (no trailing comment; stray text is stripped but double-check), that the public/private keys are a
+matching pair, and that the player being notified is signed in (guests have no account to notify).
+
 Notes: on iPhone/iPad notifications only work once the site is added to the Home Screen (the app has a manifest and icons for
 that). Only the browsers' own push services are accepted as subscription endpoints. Tapping a notification opens that game.
-`npm run e2e:push` checks the service worker and the signed-in UI; actual delivery to a phone has to be tried by hand.
+`npm run e2e:push` checks the service worker and the signed-in UI, and `npm run e2e:push-default` (API started with any `VAPID_*` values) checks the default-on prompt rules; actual delivery to a phone has to be tried by hand.
 
 ## Stress testing
 

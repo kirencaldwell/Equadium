@@ -11,11 +11,11 @@ import '@fontsource/stix-two-text/latin-400-italic.css';
 import '@fontsource/stix-two-text/latin-600.css';
 import '@fontsource/stix-two-text/latin-600-italic.css';
 import { inject } from '@vercel/analytics';
-import { api, me, room } from './api';
+import { api, me, push as pushApi, room } from './api';
 import { ico } from './icons';
 import { authAvailable, initAuth, signInWithGoogle, signOut, takePendingRoom, type User } from './auth';
 import { equation, math, tileHtml } from './tiles';
-import { disablePush, enablePush, IOS_HINT, onNotificationOpen, pausePush, pushStatus, syncPush, type PushStatus } from './push';
+import { autoEnablePush, disablePush, enablePush, IOS_HINT, onNotificationOpen, pausePush, pushStatus, syncPush, type PushStatus } from './push';
 import { currentState, parseHash, pushModal, pushRoute, replaceRoute, sameRoute, type Route } from './nav';
 import type { GameState, Mode, Placed, Preview, SavedGame, Stats, Tile } from './types';
 
@@ -383,6 +383,28 @@ async function togglePush(fromBell: boolean) {
     await refreshPushStatus();
 }
 
+/** Sends a real notification through the server and says in plain words what happened. */
+async function testPush() {
+    showToast('Sending a test notification…');
+    try {
+        const r = await pushApi.test();
+        if (!r.devices) showToast("The server has no device registered for you yet. Turn notifications off and on again.");
+        else if (r.results.every(x => x.ok)) showToast(`Sent to ${r.devices} device${r.devices > 1 ? 's' : ''}. If nothing appears, check your phone's notification settings for this browser.`);
+        else showToast(r.results.find(x => !x.ok)?.error ?? "The push service didn't accept it.");
+    } catch (e) {
+        showToast((e as Error).message || "Couldn't send a test notification.");
+    }
+}
+
+/** Default-on: the first online tap (start, join, play) is where the browser's permission prompt appears. */
+function offerPush() {
+    if (!S.user || S.push !== 'off') return;
+    void autoEnablePush(S.user.id).then(async (nowOn) => {
+        await refreshPushStatus();
+        if (nowOn) showToast("Notifications on. We'll tell you when it's your turn. Change this from the bell.");
+    });
+}
+
 /** A tapped notification asks the open page to switch to that game. */
 onNotificationOpen((code) => {
     if (S.screen === 'game' && S.online?.code === code) { pollNow(); return; }
@@ -510,6 +532,7 @@ async function enterRoom(seat: OnlineSeat, push = true) {
         saveSeat(null);                     // the room is gone: forget our seat so it stops offering "resume"
         throw e;
     }
+    if (S.user && (S.push === null || S.push === 'unavailable')) void refreshPushStatus();   // the server may have been asleep the first time
     if (push) go({ screen: 'game', kind: 'room', code: seat.code });   // after loading, so a failure leaves history untouched
     stopWatching();
     stopPolling();
@@ -1051,7 +1074,8 @@ function calcTableHtml(): string {
 function pushRowHtml(): string {
     if (!S.push || S.push === 'unsupported' || S.push === 'unavailable') return '';
     const label = S.push === 'on' ? 'Turn notifications: on' : S.push === 'blocked' ? 'Notifications are blocked in your browser' : S.push === 'needs-install' ? 'Notifications need the Home Screen app' : 'Notify me when it is my turn';
-    return `<button class="ghost wide full push-row ${S.push === 'on' ? 'on' : ''}" data-act="push-toggle">${ico(S.push === 'on' ? 'bell-on' : 'bell')}<span>${label}</span>${S.push === 'on' ? '<small>Turn off</small>' : ''}</button>`;
+    return `<button class="ghost wide full push-row ${S.push === 'on' ? 'on' : ''}" data-act="push-toggle">${ico(S.push === 'on' ? 'bell-on' : 'bell')}<span>${label}</span>${S.push === 'on' ? '<small>Turn off</small>' : ''}</button>
+        ${S.push === 'on' ? '<button class="link push-test" data-act="push-test">Send me a test notification</button>' : ''}`;
 }
 
 function modalHtml(): string {
@@ -1226,8 +1250,8 @@ app.addEventListener('click', (e) => {
         switch (act) {
             case 'start': void startGame((actEl.dataset.mode as Mode)); break;
             case 'online': showOnline(); break;
-            case 'online-create': void createOnline(); break;
-            case 'online-join': void joinOnline((document.getElementById('code') as HTMLInputElement).value); break;
+            case 'online-create': offerPush(); void createOnline(); break;
+            case 'online-join': offerPush(); void joinOnline((document.getElementById('code') as HTMLInputElement).value); break;
             case 'online-resume': { const saved = loadSaved(); if (saved) void enterRoom(saved).catch(err => showToast((err as Error).message)); break; }
             case 'copy-link':
                 void navigator.clipboard?.writeText(joinLink(S.online!.code))
@@ -1236,6 +1260,7 @@ app.addEventListener('click', (e) => {
             case 'signin': void signInWithGoogle().catch(err => showToast((err as Error).message)); break;
             case 'push-bell': void togglePush(true); break;
             case 'push-toggle': void togglePush(false); break;
+            case 'push-test': void testPush(); break;
             case 'signout': closeModal(); void pausePush().finally(() => void signOut()); break;
             case 'account': openModal('account'); break;
             case 'stats': void openStats(); break;
@@ -1261,18 +1286,18 @@ app.addEventListener('click', (e) => {
                 S.rackOrder = o; render(); break;
             }
             case 'recall': recallAll(); break;
-            case 'play': void play(); break;
+            case 'play': if (S.online) offerPush(); void play(); break;
             case 'swap': S.swapPick.clear(); openModal('swap'); break;
             case 'swap-pick': {
                 const i = Number(actEl.dataset.i);
                 if (S.swapPick.has(i)) S.swapPick.delete(i); else S.swapPick.add(i);
                 render(); break;
             }
-            case 'swap-confirm': closeModal(); void swap(); break;
+            case 'swap-confirm': if (S.online) offerPush(); closeModal(); void swap(); break;
             case 'pass': openModal('pass'); break;
             case 'forfeit': openModal('forfeit'); break;
             case 'forfeit-confirm': closeModal(); void forfeit(); break;
-            case 'pass-confirm': closeModal(); void pass(); break;
+            case 'pass-confirm': if (S.online) offerPush(); closeModal(); void pass(); break;
             case 'zoom-in': setZoom(S.zoom + 0.15); break;
             case 'zoom-out': setZoom(S.zoom - 0.15); break;
             case 'center': centerBoard(); break;
@@ -1324,7 +1349,7 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') recallAll();
 });
 
-if (import.meta.env.DEV) Object.assign(window, { __equadium: { S, render } });   // lets the browser tests drive state the app can't reach without a Google sign-in
+if (import.meta.env.DEV) Object.assign(window, { __equadium: { S, render, refreshPushStatus } });   // lets the browser tests drive state the app can't reach without a Google sign-in
 render();
 
 // Boot: restore any saved sign-in, then work out where to start: an invite link (?room=CODE) wins, otherwise

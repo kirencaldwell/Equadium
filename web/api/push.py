@@ -37,11 +37,21 @@ _PUSH_HOSTS = (
 )
 
 
+def clean_subject(raw: Optional[str]) -> str:
+    """The VAPID contact must be `mailto:you@host` or an https URL. Pasting the line printed by make_vapid_keys
+    brings its trailing "# replace with your email" comment along, and push services reject that, so keep only the first word."""
+    words = (raw or "").split()
+    subject = words[0] if words else ""
+    if subject and not subject.startswith(("mailto:", "https://")):
+        subject = f"mailto:{subject}" if "@" in subject else ""
+    return subject or "mailto:admin@example.com"
+
+
 def vapid() -> Optional[dict]:
-    pub, priv = os.getenv("VAPID_PUBLIC_KEY"), os.getenv("VAPID_PRIVATE_KEY")
+    pub, priv = (os.getenv("VAPID_PUBLIC_KEY") or "").strip(), (os.getenv("VAPID_PRIVATE_KEY") or "").strip()
     if not (pub and priv):
         return None
-    return {"public_key": pub, "private_key": priv, "subject": os.getenv("VAPID_SUBJECT") or "mailto:admin@example.com"}
+    return {"public_key": pub, "private_key": priv, "subject": clean_subject(os.getenv("VAPID_SUBJECT"))}
 
 
 def enabled() -> bool:
@@ -77,6 +87,57 @@ class EndpointModel(BaseModel):
 def config():
     v = vapid()
     return {"enabled": v is not None, "public_key": v["public_key"] if v else None}
+
+
+@router.get("/status")
+def status(user: AuthUser = Depends(require_user)):
+    """What the server knows about this player's notifications (for the account menu's test button)."""
+    try:
+        devices = len(get_store().list_push_subscriptions(user.id))
+    except Exception:
+        logger.exception("Could not list push subscriptions")
+        raise HTTPException(status_code=503, detail="Couldn't check that right now")
+    return {"enabled": enabled(), "devices": devices}
+
+
+def _describe_failure(exc: Exception) -> str:
+    status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    if status_code in (404, 410):
+        return "That device's subscription has expired. Turn notifications off and on again."
+    if status_code in (400, 401, 403):
+        return f"The push service refused it ({status_code}). Check VAPID_SUBJECT and that the public and private keys are a matching pair."
+    return f"The push service didn't accept it ({status_code or exc.__class__.__name__})."
+
+
+@router.post("/test")
+def send_test(user: AuthUser = Depends(require_user)):
+    """Sends a test notification to every device registered for this player and reports what happened per device."""
+    v = vapid()
+    if not v:
+        raise HTTPException(status_code=503, detail="Notifications are not set up on this server (missing VAPID keys)")
+    store = get_store()
+    try:
+        subs = store.list_push_subscriptions(user.id)[:MAX_DEVICES]
+    except Exception:
+        logger.exception("Could not list push subscriptions")
+        raise HTTPException(status_code=503, detail="Couldn't check that right now")
+    body = json.dumps({"title": "Equadium", "body": "Test notification. If you can see this, notifications work.",
+                       "tag": "test", "url": "/", "code": None})
+    results = []
+    for sub in subs:
+        host = urlparse(sub["endpoint"]).hostname or "?"
+        try:
+            _send_one(sub, body, v)
+            results.append({"ok": True, "service": host})
+        except Exception as exc:
+            logger.warning("Test push to %s failed: %s", host, exc)
+            results.append({"ok": False, "service": host, "error": _describe_failure(exc)})
+            if getattr(getattr(exc, "response", None), "status_code", None) in (404, 410):
+                try:
+                    store.delete_push_subscription(user.id, sub["endpoint"])
+                except Exception:
+                    logger.exception("Could not remove a dead push subscription")
+    return {"devices": len(subs), "results": results}
 
 
 @router.post("/subscribe")
@@ -125,9 +186,12 @@ def _deliver(user_id: str, payload: dict) -> None:
         logger.exception("Could not list push subscriptions")
         return
     body = json.dumps(payload)
+    if not subs:
+        logger.info("Push: %s has no registered devices, nothing to send", user_id)
     for sub in subs:
         try:
             _send_one(sub, body, v)
+            logger.info("Push sent to %s via %s", user_id, urlparse(sub["endpoint"]).hostname)
         except Exception as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status in (404, 410):          # the browser dropped this subscription: stop sending to it
@@ -160,6 +224,7 @@ def move_message(actor: str, action: str, score_delta: int, game_over: bool) -> 
 def notify_room_move(room, actor_seat: str, record) -> None:
     """Tell the other seat's signed-in player about the move just made. Call with the room lock held."""
     if not enabled():
+        logger.info("Push skipped: VAPID keys are not set on this server")
         return
     actor = room.labels.get(actor_seat, "Your opponent")
     msg = move_message(actor, record.action, record.score_delta, room.session.is_over)
