@@ -27,7 +27,7 @@ CONFIG = {
         # Numbers & Basic Operators
         "a": {"count": 5, "points": 1},
         "b": {"count": 5, "points": 1},
-        "k": {"count": 6, "points": 1},
+        "k": {"count": 6, "points": 0},   # the wild constant: any single number can stand in for k
         "2": {"count": 14, "points": 1},
         "3": {"count": 7, "points": 1},
         "4": {"count": 6, "points": 1},

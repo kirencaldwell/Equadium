@@ -10,6 +10,7 @@ class MathEngine:
     def __init__(self, config):
         self.config = config
         self.x = sp.Symbol('x')
+        self.k = sp.Symbol('k')
         # Combine standard rules with implicit multiplication rules (e.g., 2x becomes 2*x)
         self.transformations = standard_transformations + (implicit_multiplication_application,)
 
@@ -109,20 +110,20 @@ class MathEngine:
         if not is_gram_valid:
             return False, f"Invalid grammar: {gram_msg}"
 
-        # Enforce +C rule using CONFIG
+        # An integral needs its constant of integration: "+C", or "-C" (the same family of antiderivatives).
         if "int(" in expr_str and self.config["require_plus_c"]:
-            if "+C" not in expr_str.replace(" ", ""):
-                return False, "Missing constant of integration (+C)"
+            if not self._CONSTANT.search(expr_str.replace(" ", "")):
+                return False, "Missing constant of integration (+C or -C)"
 
         try:
             # Every part of a chain (a = b = c) must equal the first one.
-            # Clean up spacing and strip "+C" safely for evaluation.
-            parts = [p.replace("+C", "").replace("+ C", "").strip() for p in expr_str.split("=")]
+            # Strip the constant of integration, then compare.
+            parts = [self._CONSTANT.sub("", p.replace(" ", "")) for p in expr_str.split("=")]
             first = self._parse_expression(parts[0])
-            for part in parts[1:]:
-                if sp.simplify(first - self._parse_expression(part)) != 0:
-                    return False, "Valid"
-            return True, "Valid"
+            diffs = [self._parse_expression(part) - first for part in parts[1:]]
+            if any(d.has(self.k) for d in diffs):
+                return self._wildcard_k_works(diffs), "Valid"
+            return all(sp.simplify(d) == 0 for d in diffs), "Valid"
             
         except Exception as e:
             return False, f"Syntax Error: {e}"
@@ -140,6 +141,8 @@ class MathEngine:
                     return i == len(expr_str) - 1
         return False
 
+    # "+C" / "-C" as a term of its own: not "+Cx" (a product) or "+C(" (a call)
+    _CONSTANT = re.compile(r"[+-]C(?![A-Za-z0-9(*^])")
     _FRACTION_TILE = re.compile(r"^\d/[\dx]$")
     _NUMBER_TILE = re.compile(r"^\d+$")
     # Tokens that are a value on their own (a term to multiply), as opposed to operators and openers.
@@ -162,6 +165,26 @@ class MathEngine:
             out.append(f"({t})" if self._FRACTION_TILE.match(t) else t)
             prev = t
         return "".join(out)
+
+    def _wildcard_k_works(self, diffs):
+        """
+        k is the "magic constant": a line containing k is valid if SOME single real number, the same for every k
+        on the line, makes every link of the chain true. So 2k = 3 works (k = 3/2) and kx = 3x works (k = 3), but
+        k = x does not (no constant equals x) and kx = 3 does not (k would have to be 3/x).
+        """
+        k = self.k
+        target = next(d for d in diffs if d.has(k))
+        try:
+            candidates = sp.solve(target, k)
+        except Exception:
+            return False
+        for cand in candidates:
+            cand = sp.simplify(cand)
+            if cand.free_symbols or cand.is_real is not True:   # must be a plain real number, not depend on x, a, b
+                continue
+            if all(sp.simplify(d.subs(k, cand)) == 0 for d in diffs):
+                return True
+        return False
 
     def _parse_expression(self, expr_str):
         return self._parse_grouped(self._join_tiles(expr_str))
