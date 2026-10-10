@@ -772,6 +772,7 @@ function homeHtml(): string {
         </div>
         ${authAvailable && !S.user ? '<p class="muted small center">Sign in to keep your games and stats across devices.</p>' : ''}
         <button class="link" data-act="help">How to play</button>
+        <footer class="legal">© 2026 Kiren Caldwell. All rights reserved.</footer>
     </main>`;
 }
 
