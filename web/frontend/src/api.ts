@@ -75,6 +75,7 @@ export interface PushSub { endpoint: string; keys: { p256dh: string; auth: strin
 export const push = {
     config: () => call<{ enabled: boolean; public_key: string | null }>('/push/config'),
     subscribe: (sub: PushSub) => call<{ subscribed: boolean }>('/push/subscribe', json(sub)),
+    test: () => call<{ devices: number; results: { ok: boolean; service: string; error?: string }[] }>('/push/test', { method: 'POST' }),
     unsubscribe: (endpoint: string) => call<{ subscribed: boolean }>('/push/unsubscribe', json({ endpoint })),
 };
 

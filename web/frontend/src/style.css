@@ -357,3 +357,5 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 @media (pointer: coarse) {
     .zoom [data-act=zoom-in], .zoom [data-act=zoom-out] { display: none; }
 }
+
+.push-test { display: block; margin: -2px auto 12px; font-size: 13px; }

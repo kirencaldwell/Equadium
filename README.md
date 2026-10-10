@@ -87,6 +87,12 @@ Server setup (once): run `python -m web.api.make_vapid_keys`, then set `VAPID_PU
 bell is hidden. Subscriptions are stored in Firestore (`push_subscriptions`), so with the in-memory store they are lost on
 restart.
 
+If notifications don't arrive: turn them on, open the account menu and tap **Send me a test notification**: it goes through the
+real server and says what happened (no device registered, the push service refused it, ...). The Render logs also say
+`Push sent to ...`, `Push failed ...` or `Push skipped: VAPID keys are not set` for every move. Check that `VAPID_SUBJECT` is just
+`mailto:you@yourdomain.com` (no trailing comment; stray text is stripped but double-check), that the public/private keys are a
+matching pair, and that the player being notified is signed in (guests have no account to notify).
+
 Notes: on iPhone/iPad notifications only work once the site is added to the Home Screen (the app has a manifest and icons for
 that). Only the browsers' own push services are accepted as subscription endpoints. Tapping a notification opens that game.
 `npm run e2e:push` checks the service worker and the signed-in UI, and `npm run e2e:push-default` (API started with any `VAPID_*` values) checks the default-on prompt rules; actual delivery to a phone has to be tried by hand.

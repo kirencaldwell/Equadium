@@ -11,7 +11,7 @@ import '@fontsource/stix-two-text/latin-400-italic.css';
 import '@fontsource/stix-two-text/latin-600.css';
 import '@fontsource/stix-two-text/latin-600-italic.css';
 import { inject } from '@vercel/analytics';
-import { api, me, room } from './api';
+import { api, me, push as pushApi, room } from './api';
 import { ico } from './icons';
 import { authAvailable, initAuth, signInWithGoogle, signOut, takePendingRoom, type User } from './auth';
 import { equation, math, tileHtml } from './tiles';
@@ -383,6 +383,19 @@ async function togglePush(fromBell: boolean) {
     await refreshPushStatus();
 }
 
+/** Sends a real notification through the server and says in plain words what happened. */
+async function testPush() {
+    showToast('Sending a test notification…');
+    try {
+        const r = await pushApi.test();
+        if (!r.devices) showToast("The server has no device registered for you yet. Turn notifications off and on again.");
+        else if (r.results.every(x => x.ok)) showToast(`Sent to ${r.devices} device${r.devices > 1 ? 's' : ''}. If nothing appears, check your phone's notification settings for this browser.`);
+        else showToast(r.results.find(x => !x.ok)?.error ?? "The push service didn't accept it.");
+    } catch (e) {
+        showToast((e as Error).message || "Couldn't send a test notification.");
+    }
+}
+
 /** Default-on: the first online tap (start, join, play) is where the browser's permission prompt appears. */
 function offerPush() {
     if (!S.user || S.push !== 'off') return;
@@ -519,6 +532,7 @@ async function enterRoom(seat: OnlineSeat, push = true) {
         saveSeat(null);                     // the room is gone: forget our seat so it stops offering "resume"
         throw e;
     }
+    if (S.user && (S.push === null || S.push === 'unavailable')) void refreshPushStatus();   // the server may have been asleep the first time
     if (push) go({ screen: 'game', kind: 'room', code: seat.code });   // after loading, so a failure leaves history untouched
     stopWatching();
     stopPolling();
@@ -1060,7 +1074,8 @@ function calcTableHtml(): string {
 function pushRowHtml(): string {
     if (!S.push || S.push === 'unsupported' || S.push === 'unavailable') return '';
     const label = S.push === 'on' ? 'Turn notifications: on' : S.push === 'blocked' ? 'Notifications are blocked in your browser' : S.push === 'needs-install' ? 'Notifications need the Home Screen app' : 'Notify me when it is my turn';
-    return `<button class="ghost wide full push-row ${S.push === 'on' ? 'on' : ''}" data-act="push-toggle">${ico(S.push === 'on' ? 'bell-on' : 'bell')}<span>${label}</span>${S.push === 'on' ? '<small>Turn off</small>' : ''}</button>`;
+    return `<button class="ghost wide full push-row ${S.push === 'on' ? 'on' : ''}" data-act="push-toggle">${ico(S.push === 'on' ? 'bell-on' : 'bell')}<span>${label}</span>${S.push === 'on' ? '<small>Turn off</small>' : ''}</button>
+        ${S.push === 'on' ? '<button class="link push-test" data-act="push-test">Send me a test notification</button>' : ''}`;
 }
 
 function modalHtml(): string {
@@ -1245,6 +1260,7 @@ app.addEventListener('click', (e) => {
             case 'signin': void signInWithGoogle().catch(err => showToast((err as Error).message)); break;
             case 'push-bell': void togglePush(true); break;
             case 'push-toggle': void togglePush(false); break;
+            case 'push-test': void testPush(); break;
             case 'signout': closeModal(); void pausePush().finally(() => void signOut()); break;
             case 'account': openModal('account'); break;
             case 'stats': void openStats(); break;

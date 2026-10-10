@@ -28,6 +28,7 @@ def make_keys() -> tuple:
 
 if __name__ == "__main__":
     pub, priv = make_keys()
+    print("Set these three environment variables on the API server (replace the email with your own):\n")
     print(f"VAPID_PUBLIC_KEY={pub}")
     print(f"VAPID_PRIVATE_KEY={priv}")
-    print("VAPID_SUBJECT=mailto:you@example.com   # replace with your email")
+    print("VAPID_SUBJECT=mailto:you@example.com")

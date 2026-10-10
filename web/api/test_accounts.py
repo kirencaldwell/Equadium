@@ -777,3 +777,43 @@ def test_generated_vapid_keys_have_the_format_web_push_expects():
     # and pywebpush accepts them for signing
     from py_vapid import Vapid
     assert Vapid.from_string(priv).public_key.public_numbers() is not None
+
+
+def test_vapid_subject_is_cleaned_of_pasted_comments():
+    from web.api.push import clean_subject
+    assert clean_subject("mailto:me@x.com   # replace with your email") == "mailto:me@x.com"
+    assert clean_subject("me@x.com") == "mailto:me@x.com"
+    assert clean_subject("https://equadium.vercel.app") == "https://equadium.vercel.app"
+    assert clean_subject("") == clean_subject(None) == "mailto:admin@example.com"
+
+
+def test_push_status_and_test_button(push_on, env, monkeypatch):
+    from web.api import push
+    assert client.get("/push/status").status_code == 401 and client.post("/push/test").status_code == 401
+    assert client.get("/push/status", headers=H()).json() == {"enabled": True, "devices": 0}
+    assert client.post("/push/test", headers=H()).json() == {"devices": 0, "results": []}   # nothing registered yet
+    client.post("/push/subscribe", json=sub_body(), headers=H())
+    assert client.get("/push/status", headers=H()).json()["devices"] == 1
+    r = client.post("/push/test", headers=H()).json()
+    assert r["devices"] == 1 and r["results"] == [{"ok": True, "service": "fcm.googleapis.com"}]
+    assert push_on and "Test notification" in push_on[-1][1]["body"]
+
+    class Refused(Exception):
+        response = type("R", (), {"status_code": 403})()
+    monkeypatch.setattr(push, "_send_one", lambda sub, payload, v: (_ for _ in ()).throw(Refused()))
+    bad = client.post("/push/test", headers=H()).json()["results"][0]
+    assert bad["ok"] is False and "VAPID_SUBJECT" in bad["error"]                     # says what to check
+    assert len(env.list_push_subscriptions(ALICE)) == 1                               # a refusal keeps the subscription
+
+    class Gone(Exception):
+        response = type("R", (), {"status_code": 410})()
+    monkeypatch.setattr(push, "_send_one", lambda sub, payload, v: (_ for _ in ()).throw(Gone()))
+    assert "expired" in client.post("/push/test", headers=H()).json()["results"][0]["error"]
+    assert env.list_push_subscriptions(ALICE) == []                                   # an expired one is dropped
+
+
+def test_push_test_without_keys_explains_itself(monkeypatch):
+    monkeypatch.delenv("VAPID_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("VAPID_PRIVATE_KEY", raising=False)
+    r = client.post("/push/test", headers=H())
+    assert r.status_code == 503 and "VAPID" in r.json()["detail"]
