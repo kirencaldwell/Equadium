@@ -168,7 +168,8 @@ class MathEngine:
     def _constants_work(self, diffs, consts):
         """
         Is there a choice of real values for the free constants `consts` that makes every difference in `diffs`
-        zero for all x, a and b? The free constants are k (the wild constant: 2k = 3 works) and the constant of
+        zero for all x, a and b? The free constants are k (the wild constant: 2k = 3 works; it may be any real number
+        except 0) and the constant of
         integration of every integral on the line (so sin(x) * int(x**2) can equal x**3 sin(x)/3, with the
         constant chosen as 0, or int(x) = x**2/2 + 7).
 
@@ -186,13 +187,17 @@ class MathEngine:
         except Exception:
             return False
         for sol in solutions:
-            zero = {c: 0 for c in consts}
-            values = {c: sol.get(c, 0) for c in consts}
-            values = {c: v.subs(zero) if hasattr(v, "subs") else v for c, v in values.items()}   # any leftover freedom: use 0
-            if any(sp.sympify(v).free_symbols or sp.sympify(v).is_real is not True for v in values.values()):
-                continue                                                      # a constant must be a plain real number
-            if all(sp.simplify(d.subs(values)) == 0 for d in diffs):
-                return True
+            # A constant the equations leave free (or only tie to another one) is filled in with 0, but k is
+            # never allowed to be 0: that would make every line of the form k(...) = k(...) true for free.
+            for fill in (0, 1):
+                default = {c: (1 if c == self.k else fill) for c in consts}
+                values = {c: sp.sympify(sol.get(c, default[c])).subs(default) for c in consts}
+                if any(v.free_symbols or v.is_real is not True for v in values.values()):
+                    continue                                                  # a constant must be a plain real number
+                if self.k in values and values[self.k] == 0:
+                    continue
+                if all(sp.simplify(d.subs(values)) == 0 for d in diffs):
+                    return True
         return False
 
     def _parse_expression(self, expr_str):
