@@ -54,6 +54,26 @@ def vapid() -> Optional[dict]:
     return {"public_key": pub, "private_key": priv, "subject": clean_subject(os.getenv("VAPID_SUBJECT"))}
 
 
+def key_problem() -> Optional[str]:
+    """None if the configured VAPID keys are usable and a matching pair, else what is wrong with them (in words)."""
+    v = vapid()
+    if not v:
+        return "VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY are not set"
+    try:
+        import base64
+        from cryptography.hazmat.primitives import serialization as ser
+        from py_vapid import Vapid
+        derived = Vapid.from_string(v["private_key"]).public_key.public_bytes(ser.Encoding.X962, ser.PublicFormat.UncompressedPoint)
+    except Exception:
+        return ("VAPID_PRIVATE_KEY is not a valid key. Paste exactly the VAPID_PRIVATE_KEY line that "
+                "`python -m web.api.make_vapid_keys` printed (the shorter one), with no spaces or extra characters.")
+    pub = v["public_key"]
+    if base64.urlsafe_b64encode(derived).decode().rstrip("=") != pub.rstrip("="):
+        return ("VAPID_PUBLIC_KEY doesn't match VAPID_PRIVATE_KEY. They must come from the same run of "
+                "`python -m web.api.make_vapid_keys`.")
+    return None
+
+
 def enabled() -> bool:
     return vapid() is not None
 
@@ -106,7 +126,8 @@ def _describe_failure(exc: Exception) -> str:
         return "That device's subscription has expired. Turn notifications off and on again."
     if status_code in (400, 401, 403):
         return f"The push service refused it ({status_code}). Check VAPID_SUBJECT and that the public and private keys are a matching pair."
-    return f"The push service didn't accept it ({status_code or exc.__class__.__name__})."
+    detail = " ".join(str(exc).split())[:200]          # the push service's own reason, when it gave one
+    return f"The push service didn't accept it ({status_code or exc.__class__.__name__}): {detail}"
 
 
 @router.post("/test")
@@ -115,6 +136,10 @@ def send_test(user: AuthUser = Depends(require_user)):
     v = vapid()
     if not v:
         raise HTTPException(status_code=503, detail="Notifications are not set up on this server (missing VAPID keys)")
+    problem = key_problem()
+    if problem:
+        logger.error("Push keys are misconfigured: %s", problem)
+        raise HTTPException(status_code=503, detail=problem)
     store = get_store()
     try:
         subs = store.list_push_subscriptions(user.id)[:MAX_DEVICES]

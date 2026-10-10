@@ -650,8 +650,10 @@ def sub_body(endpoint=FCM):
 def push_on(monkeypatch):
     """VAPID configured and the network send replaced by a recorder (delivery runs inline, not on the pool)."""
     from web.api import push
-    monkeypatch.setenv("VAPID_PUBLIC_KEY", "PUBKEY")
-    monkeypatch.setenv("VAPID_PRIVATE_KEY", "PRIVKEY")
+    from web.api.make_vapid_keys import make_keys
+    pub, priv = make_keys()
+    monkeypatch.setenv("VAPID_PUBLIC_KEY", pub)
+    monkeypatch.setenv("VAPID_PRIVATE_KEY", priv)
     sent = []
     monkeypatch.setattr(push, "_send_one", lambda sub, payload, v: sent.append((sub["endpoint"], json.loads(payload))))
     monkeypatch.setattr(push, "notify", lambda user_id, payload: push._deliver(user_id, payload))
@@ -665,7 +667,7 @@ def test_push_config_is_off_without_keys_and_on_with_them(monkeypatch):
     assert client.post("/push/subscribe", json=sub_body(), headers=H()).status_code == 503
     monkeypatch.setenv("VAPID_PUBLIC_KEY", "PUBKEY")
     monkeypatch.setenv("VAPID_PRIVATE_KEY", "PRIVKEY")
-    assert client.get("/push/config").json() == {"enabled": True, "public_key": "PUBKEY"}
+    assert client.get("/push/config").json() == {"enabled": True, "public_key": "PUBKEY"}   # reported as set; /push/test validates them
 
 
 def test_push_subscribe_needs_sign_in_and_a_real_push_service(push_on, env):
@@ -817,3 +819,34 @@ def test_push_test_without_keys_explains_itself(monkeypatch):
     monkeypatch.delenv("VAPID_PRIVATE_KEY", raising=False)
     r = client.post("/push/test", headers=H())
     assert r.status_code == 503 and "VAPID" in r.json()["detail"]
+
+
+def test_push_test_reports_unexpected_failures_with_their_reason(push_on, monkeypatch):
+    from web.api import push
+    client.post("/push/subscribe", json=sub_body(), headers=H())
+
+    class Odd(Exception):
+        response = type("R", (), {"status_code": 429})()
+    monkeypatch.setattr(push, "_send_one", lambda sub, payload, v: (_ for _ in ()).throw(Odd("slow down please")))
+    err = client.post("/push/test", headers=H()).json()["results"][0]["error"]
+    assert "429" in err and "slow down please" in err
+
+    monkeypatch.setattr(push, "_send_one", lambda sub, payload, v: (_ for _ in ()).throw(ValueError("Could not deserialize key data")))
+    err = client.post("/push/test", headers=H()).json()["results"][0]["error"]
+    assert "ValueError" in err and "deserialize" in err          # a bad key shows up as itself, not just "didn't accept"
+
+
+def test_misconfigured_vapid_keys_are_named_by_the_test_button(monkeypatch):
+    from web.api.make_vapid_keys import make_keys
+    pub, priv = make_keys()
+    other_pub, _ = make_keys()
+    from web.api import push
+    for env_pub, env_priv, expect in [(pub, priv, None), (pub, pub, "not a valid key"), (pub, priv[:-4], "not a valid key"),
+                                      (other_pub, priv, "doesn't match")]:
+        monkeypatch.setenv("VAPID_PUBLIC_KEY", env_pub)
+        monkeypatch.setenv("VAPID_PRIVATE_KEY", env_priv)
+        problem = push.key_problem()
+        assert (problem is None) if expect is None else (expect in problem)
+    client.post("/push/subscribe", json=sub_body(), headers=H())      # the last combination above: mismatched pair
+    r = client.post("/push/test", headers=H())
+    assert r.status_code == 503 and "doesn't match" in r.json()["detail"]
