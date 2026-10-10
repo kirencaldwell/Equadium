@@ -109,7 +109,7 @@ def test_agent_vs_agent_step_and_autoplay(monkeypatch):
     step = client.post(f"/games/{gid}/agent_step").json()
     assert step["move"]["player"] == "Newton_Bot"
     out = client.post(f"/games/{gid}/autoplay").json()
-    assert out["end_reason"] in ("turn limit", "stalled", "rack empty", "bag empty+stuck")
+    assert out["end_reason"] in ("turn limit", "stalled", "last tile drawn")
     assert client.get(f"/games/{gid}").json()["game_over"] is True
 
 

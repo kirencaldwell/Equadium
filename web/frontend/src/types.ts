@@ -39,6 +39,7 @@ export interface GameState {
     winners: string[];
     turns_played: number;
     bag_count: number;
+    final_turn?: boolean;   // the last tile has been drawn: each player gets one more turn at most
     last_move: LastMove | null;
     /** online games only */
     labels?: Record<string, string>;

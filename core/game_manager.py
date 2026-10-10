@@ -64,6 +64,9 @@ class EquadiumGame:
         # Game-level counters
         self.turns_played = 0
         self.consecutive_non_plays = 0  # resets on any successful tile play
+        # Set when a play draws the last tile from the bag: the game is over once this many turns have been played,
+        # i.e. after every other player has had one final turn.
+        self.final_turn_count: Optional[int] = None
         
         # Initialize both distinct bags
         self.tile_bag = self._initialize_normal_bag()
@@ -89,11 +92,11 @@ class EquadiumGame:
     def is_game_over(self) -> bool:
         """
         The game ends when:
-          1. Any player's rack is empty (they've exhausted their tiles), OR
-          2. The bag is empty AND all players are stuck
-             (consecutive non-play turns >= number of players), OR
-          3. Nobody has played for `stall_rounds` full rounds, OR
-          4. The turn limit (`max_turns`) is reached.
+          1. A play draws the last tile from the bag. The player who drew it has had their turn, and every other
+             player then gets one final "rebuttal" turn, after which the game is over, OR
+          2. Nobody has played for `stall_rounds` full rounds, OR
+          3. The turn limit (`max_turns`) is reached, OR
+          4. A player forfeits.
         """
         return self.end_reason is not None
 
@@ -102,10 +105,8 @@ class EquadiumGame:
         """Why the game is over, or None if it is still in progress."""
         if self.forfeited_by is not None:
             return "forfeit"
-        if any(len(p.rack) == 0 for p in self.players):
-            return "rack empty"
-        if not self.tile_bag and self.consecutive_non_plays >= len(self.players):
-            return "bag empty+stuck"
+        if self.final_turn_count is not None and self.turns_played >= self.final_turn_count:
+            return "last tile drawn"
         # With a few tiles left in the bag, players can swap them back and forth forever.
         stall_rounds = self.config.get("stall_rounds", 3)
         if stall_rounds and self.consecutive_non_plays >= stall_rounds * len(self.players):
@@ -237,6 +238,7 @@ class EquadiumGame:
             "consecutive_non_plays": self.consecutive_non_plays,
             "stats": {name: vars(st).copy() for name, st in self.stats.items()},
             "forfeited_by": self.forfeited_by,
+            "final_turn_count": self.final_turn_count,
         }
 
     @classmethod
@@ -257,6 +259,10 @@ class EquadiumGame:
         game.consecutive_non_plays = d["consecutive_non_plays"]
         game.stats = {name: PlayerStats(**st) for name, st in d["stats"].items()}
         game.forfeited_by = d.get("forfeited_by")      # absent in games saved before forfeits existed
+        game.final_turn_count = d.get("final_turn_count")
+        if game.final_turn_count is None and not game.tile_bag and game.forfeited_by is None:
+            # a game saved before this rule whose bag is already empty: everyone gets one more turn
+            game.final_turn_count = game.turns_played + len(game.players)
         return game
 
     def display_scoreboard(self):
@@ -488,6 +494,9 @@ class EquadiumGame:
             # Draw replacements
             self.draw_tiles(player)
             self.consecutive_non_plays = 0  # successful play resets the stuck counter
+            if not self.tile_bag and self.final_turn_count is None:
+                # This play drew the last tile. It is turn turns_played + 1; every other player then gets one more.
+                self.final_turn_count = self.turns_played + len(self.players)
             self._advance_turn()
             if self.verbose:
                 self.display_game_state()

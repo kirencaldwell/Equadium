@@ -181,6 +181,81 @@ def test_fingerprints_agree_with_engine():
     assert checked > 0
 
 
+# ---- the end of the game: the last tile is drawn, then one final turn ----
+FULL = ["="] + ["x"] * 14        # a full rack: playing "=" and one "x" draws exactly two tiles to refill it
+
+
+def _bag_with(session, n):
+    session.game.tile_bag = session.game.tile_bag[:n]
+
+
+def _play_x_equals(session, player="Player1"):
+    r, c = CENTER
+    return session.play(player, place(session.game, ["=", "x"], (r, c + 1)), "H")
+
+
+def test_drawing_the_last_tile_gives_the_other_player_one_final_turn():
+    s = fresh_session(rack0=FULL, rack1=FULL)
+    _bag_with(s, 2)                                    # the play below draws two tiles: the bag is then empty
+    assert _play_x_equals(s).ok
+    g = s.game
+    assert not g.tile_bag and not s.is_over            # not over yet: the other player answers
+    assert g.final_turn_count == 2 and s.current_player.name == "Player2"
+    assert s.pass_turn("Player2").ok                   # the rebuttal turn
+    assert s.is_over and g.end_reason == "last tile drawn"
+
+
+def test_the_final_turn_can_be_a_play_and_then_the_game_is_over():
+    s = fresh_session(rack0=FULL, rack1=FULL)
+    _bag_with(s, 2)
+    _play_x_equals(s)
+    r, c = CENTER
+    rec = s.play("Player2", place(s.game, ["=", "x"], (r + 1, c), "V"), "V")      # x = x downwards from the centre
+    assert rec.ok and s.is_over and s.game.end_reason == "last tile drawn"
+    with pytest.raises(ValueError):                                          # nobody moves after that
+        s.pass_turn("Player1")
+
+
+def test_the_game_goes_on_while_tiles_remain():
+    s = fresh_session(rack0=FULL, rack1=FULL)
+    _bag_with(s, 3)
+    _play_x_equals(s)
+    assert len(s.game.tile_bag) == 1 and s.game.final_turn_count is None and not s.is_over
+
+
+def test_a_swap_never_triggers_the_end():
+    s = fresh_session(rack0=FULL, rack1=FULL)
+    _bag_with(s, 2)
+    s.swap("Player1", [1])
+    assert s.game.final_turn_count is None and not s.is_over
+
+
+def test_final_turn_survives_saving_and_old_saves_with_an_empty_bag_get_one_more_turn():
+    import json
+    s = fresh_session(rack0=FULL, rack1=FULL)
+    _bag_with(s, 2)
+    _play_x_equals(s)
+    loaded = GameSession.from_dict(json.loads(json.dumps(s.to_dict())), CONFIG)
+    assert loaded.game.final_turn_count == 2 and not loaded.is_over
+    assert loaded.pass_turn("Player2").ok and loaded.is_over
+    # a game saved before the rule existed, mid-game with the bag already empty
+    d = json.loads(json.dumps(s.to_dict()))
+    del d["game"]["final_turn_count"]
+    old = GameSession.from_dict(d, CONFIG)
+    assert old.game.final_turn_count == old.game.turns_played + 2 and not old.is_over
+
+
+def test_state_tells_the_app_the_final_turn_has_begun():
+    from web.api.serialize import game_to_model
+    s = fresh_session(rack0=FULL, rack1=FULL)
+    assert game_to_model(s)["final_turn"] is False
+    _bag_with(s, 2)
+    _play_x_equals(s)
+    assert game_to_model(s)["final_turn"] is True
+    s.pass_turn("Player2")
+    assert game_to_model(s)["final_turn"] is False and game_to_model(s)["end_reason"] == "last tile drawn"
+
+
 # ---- calculus tiles inside bigger expressions ----
 @pytest.mark.parametrize("equation,expected", [
     ("d/dx(x**2)+x=3x", True),                          # a derivative as one term of a sum
