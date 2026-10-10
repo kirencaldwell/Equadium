@@ -11,6 +11,7 @@
     "e2e:forfeit": "node e2e/forfeit.mjs",
     "e2e:calc": "node e2e/calc.mjs",
     "e2e:pinch": "node e2e/pinch.mjs",
+    "e2e:preview": "node e2e/preview.mjs",
     "e2e:rack": "node e2e/rack.mjs",
     "e2e:push": "node e2e/push.mjs",
     "e2e:push-default": "node e2e/push-default.mjs",

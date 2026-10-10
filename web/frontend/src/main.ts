@@ -14,7 +14,7 @@ import { inject } from '@vercel/analytics';
 import { api, me, push as pushApi, room } from './api';
 import { ico } from './icons';
 import { authAvailable, initAuth, signInWithGoogle, signOut, takePendingRoom, type User } from './auth';
-import { equation, math, tileHtml } from './tiles';
+import { equation, equationFromTiles, math, tileHtml } from './tiles';
 import { autoEnablePush, disablePush, enablePush, IOS_HINT, onNotificationOpen, pausePush, pushStatus, syncPush, type PushStatus } from './push';
 import { currentState, parseHash, pushModal, pushRoute, replaceRoute, sameRoute, type Route } from './nav';
 import type { GameState, Mode, Placed, Preview, SavedGame, Stats, Tile } from './types';
@@ -937,12 +937,30 @@ function statusText(g: GameState): string {
     return base;
 }
 
+/** Every square of the rows and columns the pending tiles make equations of, existing tiles included. */
+function equationCells(g: GameState): Set<string> {
+    const cells = new Set<string>();
+    if (!S.placed.length) return cells;
+    const filled = (r: number, c: number) => !!g.board.grid[r]?.[c] || S.placed.some(p => p.r === r && p.c === c);
+    const run = (r: number, c: number, dr: number, dc: number) => {
+        while (filled(r - dr, c - dc)) { r -= dr; c -= dc; }
+        const out: string[] = [];
+        while (filled(r, c)) { out.push(`${r},${c}`); r += dr; c += dc; }
+        return out;
+    };
+    const [mr, mc] = direction() === 'H' ? [0, 1] : [1, 0];
+    const lines = [run(S.placed[0].r, S.placed[0].c, mr, mc), ...S.placed.map(p => run(p.r, p.c, mc, mr))];
+    for (const line of lines) if (line.length > 1) line.forEach(k => cells.add(k));
+    return cells;
+}
+
 function boardHtml(g: GameState): string {
     const { width, height, grid } = g.board;
     const lastCells = new Set((g.last_move?.cells ?? []).map(([r, c]) => `${r},${c}`));
     const midR = Math.floor(height / 2), midC = Math.floor(width / 2);
     const placedAt = new Map(S.placed.map(p => [`${p.r},${p.c}`, p]));
     const valid = S.preview?.valid;
+    const inEquation = valid ? equationCells(g) : new Set<string>();   // lit up green along with the pending tiles
     const canDrop = canArrange();
     let html = `<div class="board" style="grid-template-columns:repeat(${width}, var(--cell-size))">`;
     for (let r = 0; r < height; r++) {
@@ -952,7 +970,7 @@ function boardHtml(g: GameState): string {
             const p = placedAt.get(key);
             const cls = ['cell', r === midR && c === midC ? 'start' : ''].join(' ');
             let inner = '';
-            if (t) inner = tileHtml(t, `${lastCells.has(key) ? 'last' : ''} ${S.fresh.has(key) ? 'pop' : ''}`);
+            if (t) inner = tileHtml(t, `${lastCells.has(key) ? 'last' : ''} ${inEquation.has(key) ? 'eq-ok' : ''} ${S.fresh.has(key) ? 'pop' : ''}`);
             else if (p) {
                 const sel = S.selected?.kind === 'placed' && S.selected.r === r && S.selected.c === c;
                 inner = tileHtml(p.tile, `pending ${valid ? 'ok' : ''} ${sel ? 'selected' : ''} ${S.fresh.has(key) ? 'pop' : ''}`);
@@ -990,13 +1008,15 @@ function previewHtml(): string {
     }
     if (!p) return '<div class="preview hint">…</div>';
     if (p.valid) {
-        return `<div class="preview good"><span class="eqs">${p.equations.map(equation).join('<span class="sep">·</span>')}</span><span class="pill">+${p.score}</span></div>`;
+        const lines = p.equation_tiles?.length ? p.equation_tiles.map(equationFromTiles) : p.equations.map(equation);
+        return `<div class="preview good"><span class="eqs">${lines.join('<span class="sep"></span>')}</span><span class="pill">+${p.score}</span></div>`;
     }
     const bad = p.reason?.match(/^'(.+)' is not a valid equation \((.*)\)$/);
     if (bad) {
         // the engine's message for a plain math mismatch is "Valid"; anything else is a layout problem
         const why = bad[2] === 'Valid' ? "doesn't balance. Every row and column your tiles touch must be true." : "isn't a complete equation yet.";
-        return `<div class="preview hint bad"><span class="eqs">${equation(bad[1])}</span><span class="why">${why}</span></div>`;
+        const line = p.reason_tiles?.length ? equationFromTiles(p.reason_tiles) : equation(bad[1]);
+        return `<div class="preview hint bad"><span class="eqs">${line}</span><span class="why">${why}</span></div>`;
     }
     return `<div class="preview hint">${p.reason ? humanReason(p.reason) : 'Keep building…'}</div>`;
 }

@@ -37,3 +37,25 @@ export function tileHtml(tile: Tile, extra = ''): string {
     const long = tile.symbol.length > 3 && !/^(x\*\*|1\/)/.test(tile.symbol) ? ' long' : '';
     return `<div class="tile ${kind}${long} ${extra}"><span class="face">${math(tile.symbol)}</span>${pts}${mult}</div>`;
 }
+
+const OPERATORS = new Set(['+', '-', '=']);
+const OPENERS = new Set(['d/dx(', 'int(', 'exp(', '(']);
+
+/**
+ * An equation spelled out tile by tile, easy to read: operators get room, and two tiles that multiply are
+ * separated by a dot ("3 · x³ · x²"), so it is clear where one tile ends and the next begins.
+ */
+export function equationFromTiles(symbols: string[]): string {
+    let html = '', prev: string | null = null;
+    for (const t of symbols) {
+        const op = OPERATORS.has(t), closer = t === ')';
+        const prevEndsValue = prev !== null && !OPERATORS.has(prev) && !OPENERS.has(prev);
+        if (op) html += `<span class="op">${t === '-' ? '\u2212' : t}</span>`;
+        else {
+            if (!closer && prevEndsValue) html += '<i class="dot">\u00b7</i>';
+            html += `<span class="term">${math(t)}</span>`;
+        }
+        prev = t;
+    }
+    return `<span class="eq">${html}</span>`;
+}
