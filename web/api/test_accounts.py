@@ -1,5 +1,6 @@
 """Sign-in, saved games and stats. Uses an in-memory store and locally minted Firebase-style ID tokens."""
 import datetime
+import json
 import time
 
 import jwt
@@ -437,6 +438,9 @@ class FakeDoc:
         _check_firestore_value(data)
         self.col.docs[self.id] = {**self.col.docs[self.id], **data}
 
+    def delete(self, timeout=None):
+        self.col.docs.pop(self.id, None)
+
 
 class FakeQuery:
     def __init__(self, col, filters=(), fields=None, n=None):
@@ -632,3 +636,131 @@ def test_online_forfeit_needs_a_seat_and_an_opponent():
     assert client.post(f"/rooms/{host['code']}/forfeit", headers=H("someone-else", "Eve")).status_code == 403
     lonely = client.post("/rooms", json={}).json()                                                # nobody joined yet
     assert client.post(f"/rooms/{lonely['code']}/forfeit", headers={"X-Player-Token": lonely["token"]}).status_code == 409
+
+
+# ── web push: tell the other player when it's their turn ────────────────────
+FCM = "https://fcm.googleapis.com/fcm/send/abc123"
+
+
+def sub_body(endpoint=FCM):
+    return {"endpoint": endpoint, "keys": {"p256dh": "BPk", "auth": "au"}}
+
+
+@pytest.fixture
+def push_on(monkeypatch):
+    """VAPID configured and the network send replaced by a recorder (delivery runs inline, not on the pool)."""
+    from web.api import push
+    monkeypatch.setenv("VAPID_PUBLIC_KEY", "PUBKEY")
+    monkeypatch.setenv("VAPID_PRIVATE_KEY", "PRIVKEY")
+    sent = []
+    monkeypatch.setattr(push, "_send_one", lambda sub, payload, v: sent.append((sub["endpoint"], json.loads(payload))))
+    monkeypatch.setattr(push, "notify", lambda user_id, payload: push._deliver(user_id, payload))
+    return sent
+
+
+def test_push_config_is_off_without_keys_and_on_with_them(monkeypatch):
+    monkeypatch.delenv("VAPID_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("VAPID_PRIVATE_KEY", raising=False)
+    assert client.get("/push/config").json() == {"enabled": False, "public_key": None}
+    assert client.post("/push/subscribe", json=sub_body(), headers=H()).status_code == 503
+    monkeypatch.setenv("VAPID_PUBLIC_KEY", "PUBKEY")
+    monkeypatch.setenv("VAPID_PRIVATE_KEY", "PRIVKEY")
+    assert client.get("/push/config").json() == {"enabled": True, "public_key": "PUBKEY"}
+
+
+def test_push_subscribe_needs_sign_in_and_a_real_push_service(push_on, env):
+    assert client.post("/push/subscribe", json=sub_body()).status_code == 401
+    for bad in ("http://fcm.googleapis.com/x", "https://169.254.169.254/latest", "https://localhost/x",
+                "https://evil.example.com/fcm.googleapis.com", "https://fcm.googleapis.com.evil.com/x",
+                "https://user:pw@fcm.googleapis.com/x"):
+        assert client.post("/push/subscribe", json=sub_body(bad), headers=H()).status_code == 400, bad
+    for ok in (FCM, "https://updates.push.services.mozilla.com/wpush/v2/abc", "https://web.push.apple.com/Qabc"):
+        assert client.post("/push/subscribe", json=sub_body(ok), headers=H()).status_code == 200, ok
+    assert len(env.list_push_subscriptions(ALICE)) == 3
+
+
+def test_push_unsubscribe_only_removes_your_own(push_on, env):
+    client.post("/push/subscribe", json=sub_body(), headers=H())
+    client.post("/push/unsubscribe", json={"endpoint": FCM}, headers=H(BOB, "Bob"))
+    assert len(env.list_push_subscriptions(ALICE)) == 1
+    client.post("/push/unsubscribe", json={"endpoint": FCM}, headers=H())
+    assert env.list_push_subscriptions(ALICE) == []
+
+
+def test_opponent_is_notified_after_a_move_but_not_the_mover(push_on):
+    client.post("/push/subscribe", json=sub_body(), headers=H())
+    client.post("/push/subscribe", json=sub_body("https://fcm.googleapis.com/fcm/send/bob"), headers=H(BOB, "Bob"))
+    host, guest = make_room()
+    room = rooms._rooms[host["code"]]
+    seat_user = {host["seat"]: (H(), "fcm/send/abc123"), guest["seat"]: (H(BOB, "Bob"), "fcm/send/bob")}
+    for i in (0, 1):
+        rig(room.session, i, ["=", "x", "2", "x"])
+    mover = room.session.current_player.name
+    other = next(s for s in seat_user if s != mover)
+    assert client.post(f"/rooms/{host['code']}/play", json=eq_play(), headers=seat_user[mover][0]).json()["status"] == "success"
+    assert len(push_on) == 1
+    endpoint, payload = push_on[0]
+    assert endpoint.endswith(seat_user[other][1])                     # the other player, not the mover
+    assert "Your turn" in payload["body"] and payload["url"] == f"/#/room/{host['code']}"
+    assert payload["tag"] == f"room-{host['code']}"
+
+
+def test_failed_moves_and_guest_opponents_send_nothing(push_on):
+    client.post("/push/subscribe", json=sub_body(), headers=H())
+    host = client.post("/rooms", json={}, headers=H()).json()           # Alice hosts; the guest is not signed in
+    guest = client.post(f"/rooms/{host['code']}/join", json={}).json()
+    room = rooms._rooms[host["code"]]
+    mover_seat = room.session.current_player.name
+    tokens = {host["seat"]: H(), guest["seat"]: {"X-Player-Token": guest["token"]}}
+    for i in (0, 1):
+        rig(room.session, i, ["=", "x", "2", "x"])
+    t = lambda sym, pts: {"symbol": sym, "points": pts, "expr_multiplier": 1}
+    stray = {"tiles_to_play": [{"r": 0, "c": 0, "tile": t("=", 0)}, {"r": 0, "c": 1, "tile": t("x", 1)}], "direction": "H"}   # not touching the board
+    assert client.post(f"/rooms/{host['code']}/play", json=stray, headers=tokens[mover_seat]).json()["status"] == "failed"
+    assert push_on == []
+    if mover_seat == guest["seat"]:                                      # the guest moves: Alice is told
+        client.post(f"/rooms/{host['code']}/pass", headers=tokens[mover_seat])
+        assert len(push_on) == 1
+    else:                                                                # Alice moves: the guest has no account to notify
+        client.post(f"/rooms/{host['code']}/pass", headers=tokens[mover_seat])
+        assert push_on == []
+
+
+def test_forfeit_and_game_over_messages(push_on, monkeypatch):
+    from web.api import push
+    assert "forfeited" in push.move_message("Bob", "forfeit", 0, True)
+    assert "over" in push.move_message("Bob", "play", 5, True)
+    assert push.move_message("Bob", "play", 12, False) == "Bob played for 12 points. Your turn!"
+    assert "swapped" in push.move_message("Bob", "swap", 0, False) and "passed" in push.move_message("Bob", "pass", 0, False)
+
+
+def test_dead_subscriptions_are_removed_and_other_errors_kept(push_on, env, monkeypatch):
+    from web.api import push
+
+    class Gone(Exception):
+        response = type("R", (), {"status_code": 410})()
+
+    class Flaky(Exception):
+        response = type("R", (), {"status_code": 500})()
+
+    client.post("/push/subscribe", json=sub_body(), headers=H())
+    client.post("/push/subscribe", json=sub_body("https://fcm.googleapis.com/fcm/send/second"), headers=H())
+
+    def fake(sub, payload, v):
+        raise Gone() if sub["endpoint"] == FCM else Flaky()
+    monkeypatch.setattr(push, "_send_one", fake)
+    push._deliver(ALICE, {"body": "hi"})
+    left = [s["endpoint"] for s in env.list_push_subscriptions(ALICE)]
+    assert left == ["https://fcm.googleapis.com/fcm/send/second"]       # 410 dropped, 500 kept for next time
+
+
+def test_store_contract_push_subscriptions(any_store):
+    a = {"endpoint": FCM, "keys": {"p256dh": "k", "auth": "a"}}
+    any_store.save_push_subscription(ALICE, a)
+    any_store.save_push_subscription(ALICE, a)                           # idempotent per endpoint
+    any_store.save_push_subscription(BOB, {**a, "endpoint": FCM + "b"})
+    assert [s["endpoint"] for s in any_store.list_push_subscriptions(ALICE)] == [FCM]
+    any_store.delete_push_subscription(BOB, FCM)                         # not Bob's
+    assert len(any_store.list_push_subscriptions(ALICE)) == 1
+    any_store.delete_push_subscription(ALICE, FCM)
+    assert any_store.list_push_subscriptions(ALICE) == []

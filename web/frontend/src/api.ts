@@ -71,6 +71,13 @@ export const room = {
         call<ActionResult>(`/rooms/${code}/forfeit`, authed(token, { method: 'POST' })),
 };
 
+export interface PushSub { endpoint: string; keys: { p256dh: string; auth: string } }
+export const push = {
+    config: () => call<{ enabled: boolean; public_key: string | null }>('/push/config'),
+    subscribe: (sub: PushSub) => call<{ subscribed: boolean }>('/push/subscribe', json(sub)),
+    unsubscribe: (endpoint: string) => call<{ subscribed: boolean }>('/push/unsubscribe', json({ endpoint })),
+};
+
 export const me = {
     profile: () => call<{ id: string; name: string | null; saving: string }>('/me'),
     games: () => call<{ games: SavedGame[] }>('/me/games'),

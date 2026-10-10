@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from core.game_config import CONFIG
 from core.session import GameSession
 from web.api.models import MoveModel, SwapModel
-from web.api import persistence
+from web.api import persistence, push
 from web.api.auth import AuthUser, optional_user
 from web.api.serialize import game_to_model, _tiles_from_model
 from web.api.store import get_store
@@ -239,6 +239,7 @@ def _act(room: Room, token: Optional[str], user: Optional[AuthUser], fn):
         if record.ok:
             room.touch()
             _save_room(room)
+            push.notify_room_move(room, seat, record)   # tell the other player (fire and forget)
         return {
             "status": "success" if record.ok else "failed",
             "error": record.error,

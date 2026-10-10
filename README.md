@@ -73,6 +73,21 @@ Without `FIRESTORE_EMULATOR_HOST` the emulator tests are skipped and the store i
   `pip install -r requirements.txt`. Set `ALLOWED_ORIGINS` to your Vercel URL plus `FIREBASE_PROJECT_ID` and
   `FIREBASE_SERVICE_ACCOUNT`. Run a single instance: the in-memory cache and per-game locks are per-process.
 
+## Turn notifications
+
+Signed-in players can get a push notification when the other player moves in an online game: tap the bell in the
+game bar (or "Notify me when it is my turn" in the account menu). It uses standard Web Push, so there is no extra
+service to sign up for.
+
+Server setup (once): run `python -m web.api.make_vapid_keys`, then set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and
+`VAPID_SUBJECT` (a `mailto:` address) on the API server (Render) and redeploy. Without them the feature is off and the
+bell is hidden. Subscriptions are stored in Firestore (`push_subscriptions`), so with the in-memory store they are lost on
+restart.
+
+Notes: on iPhone/iPad notifications only work once the site is added to the Home Screen (the app has a manifest and icons for
+that). Only the browsers' own push services are accepted as subscription endpoints. Tapping a notification opens that game.
+`npm run e2e:push` checks the service worker and the signed-in UI; actual delivery to a phone has to be tried by hand.
+
 ## Stress testing
 
 ```
