@@ -39,37 +39,28 @@ check('5 forfeiting ends the game as a loss for you', /You forfeited/.test(over)
 check('6 the Computer is shown as the winner, whatever the score', await pg.evaluate(() => /Computer/.test(document.querySelector('.final .win')?.textContent ?? '')));
 check('7 no forfeit button once the game is over', !(await has(pg, '.bar [data-act=forfeit]')));
 
-// ── pass & play: the player to move gives up
-pg = await newPage();
-await pg.click('[data-mode=human_vs_human]'); await pg.waitForSelector('.board');
-await pg.click('.bar [data-act=forfeit]'); await pg.waitForSelector('.modal.forfeit');
-check('8 pass & play names who is giving up', /Player1 gives up/.test(await text(pg, '.modal.forfeit')), await text(pg, '.modal.forfeit'));
-await pg.click('[data-act=forfeit-confirm]'); await pg.waitForSelector('.modal.over');
-const over2 = await text(pg, '.modal.over');
-check('9 …and the other player wins', /Player1 forfeited/.test(over2) && /Player2/.test(await text(pg, '.final .win')), over2);
-
 // ── watching bots: nobody to forfeit
 pg = await newPage();
 await pg.click('[data-mode=agent_vs_agent]'); await pg.waitForSelector('.board');
-check('10 no forfeit button when watching bots', !(await has(pg, '.bar [data-act=forfeit]')));
+check('8 no forfeit button when watching bots', !(await has(pg, '.bar [data-act=forfeit]')));
 
 // ── online: two separate browsers
 const host = await newPage(), guest = await newPage();
 await host.click('[data-act=online]'); await host.waitForSelector('.online-title');
 await host.click('[data-act=online-create]'); await host.waitForSelector('.lobby .code');
 const code = (await text(host, '.lobby .code')).trim();
-check('11 no forfeit button in the lobby while waiting for an opponent', !(await has(host, '.bar [data-act=forfeit]')));
+check('9 no forfeit button in the lobby while waiting for an opponent', !(await has(host, '.bar [data-act=forfeit]')));
 await guest.click('[data-act=online]'); await guest.waitForSelector('.online-title');
 await guest.fill('#code', code); await guest.click('[data-act=online-join]');
 await guest.waitForSelector('.board'); await host.waitForSelector('.board', { timeout: 10000 });
-check('12 both players have the forfeit button', await has(host, '.bar [data-act=forfeit]') && await has(guest, '.bar [data-act=forfeit]'));
+check('10 both players have the forfeit button', await has(host, '.bar [data-act=forfeit]') && await has(guest, '.bar [data-act=forfeit]'));
 await guest.click('.bar [data-act=forfeit]'); await guest.waitForSelector('.modal.forfeit');
-check('13 the online prompt names the opponent', /win for/.test(await text(guest, '.modal.forfeit')), await text(guest, '.modal.forfeit'));
+check('11 the online prompt names the opponent', /win for/.test(await text(guest, '.modal.forfeit')), await text(guest, '.modal.forfeit'));
 await guest.click('[data-act=forfeit-confirm]'); await guest.waitForSelector('.modal.over');
-check('14 the forfeiter sees a loss', /You forfeited/.test(await text(guest, '.modal.over')), await text(guest, '.modal.over'));
+check('12 the forfeiter sees a loss', /You forfeited/.test(await text(guest, '.modal.over')), await text(guest, '.modal.over'));
 await host.waitForSelector('.modal.over', { timeout: 10000 });    // arrives by polling
 const hostOver = await text(host, '.modal.over');
-check('15 the opponent is told, and wins', /forfeited\. You win!/.test(hostOver), hostOver);
+check('13 the opponent is told, and wins', /forfeited\. You win!/.test(hostOver), hostOver);
 
 console.log(`\n${pass} passed, ${fail} failed; page errors: ${JSON.stringify(errs)}`);
 await b.close();

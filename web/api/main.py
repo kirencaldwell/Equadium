@@ -198,16 +198,23 @@ def _result(session, record, agent_records):
     }
 
 
+# Games created through /games/create. Two-player games are played online (see rooms.py); the two-humans-on-one-screen
+# mode ("Pass & Play") has been removed. The engine still has the human_vs_human mode, which online rooms use.
+SOLO_MODES = ("human_vs_agent", "agent_vs_agent")
+
+
 @app.get("/modes")
 def list_modes():
-    return {mode: [{"name": n, "kind": k} for n, k in seats] for mode, seats in MODES.items()}
+    return {mode: [{"name": n, "kind": k} for n, k in MODES[mode]] for mode in SOLO_MODES}
 
 
 @app.post("/games/create")
 def create_game(body: Optional[CreateGameModel] = None, user: Optional[AuthUser] = Depends(optional_user)):
     mode = body.mode if body else "human_vs_agent"
-    if mode not in MODES:
-        raise HTTPException(status_code=400, detail=f"Unknown mode '{mode}'. Choose from: {', '.join(MODES)}")
+    if mode == "human_vs_human":
+        raise HTTPException(status_code=400, detail="Two-player games are played online now: create a room with POST /rooms.")
+    if mode not in SOLO_MODES:
+        raise HTTPException(status_code=400, detail=f"Unknown mode '{mode}'. Choose from: {', '.join(SOLO_MODES)}")
     game_id = secrets.token_urlsafe(9)
     session = GameSession(mode, CONFIG)
     session.owner_id = user.id if user and mode != "agent_vs_agent" else None

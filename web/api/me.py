@@ -49,6 +49,8 @@ def my_games(user: AuthUser = Depends(require_user)):
     for rec in recs:
         if _age_days(rec["updated_at"]) > STALE_AFTER_DAYS:
             continue
+        if rec["kind"] == "solo" and rec["mode"] == "human_vs_human":
+            continue          # old Pass & Play games: that mode no longer exists, so there is nothing to resume
         seat_users = rec["meta"].get("seat_users", {})
         seat = next((s for s, uid in seat_users.items() if uid == user.id), None)
         summary = rec.get("summary") or {}

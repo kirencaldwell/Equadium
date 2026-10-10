@@ -66,9 +66,8 @@ const S = {
     rackSyms: [] as string[],            // the same order as tile symbols, so your arrangement survives drawing new tiles
     preview: null as Preview | null,
     busy: null as null | 'submitting' | 'thinking',
-    modal: null as null | 'help' | 'calc' | 'swap' | 'pass' | 'forfeit' | 'handoff' | 'over' | 'account',
+    modal: null as null | 'help' | 'calc' | 'swap' | 'pass' | 'forfeit' | 'over' | 'account',
     swapPick: new Set<number>(),
-    handoffFor: null as string | null,
     zoom: 1,
     fresh: new Set<string>(),       // cells that just got a tile (for the pop animation)
     shake: false,
@@ -96,9 +95,7 @@ function actingPlayer(): string | null {
     if (!g) return null;
     if (S.online) return S.online.seat;
     const humans = Object.entries(g.seats).filter(([, k]) => k === 'human').map(([n]) => n);
-    if (humans.length === 0) return null;
-    if (humans.length === 1) return humans[0];
-    return g.current_player;
+    return humans[0] ?? null;      // solo games have at most one human seat
 }
 
 /** You may arrange tiles whenever the game is live and you hold a seat, so you can try a play while the
@@ -605,7 +602,6 @@ async function submitAction(run: () => Promise<{ status: string; error: string |
     // Moves need it to be your turn; giving up does not.
     if (anyTurn ? !(S.game && !S.game.game_over && !S.busy) : !myTurn()) return;
     const me = actingPlayer()!;
-    const hotSeat = S.game!.mode === 'human_vs_human' && !S.online;
     S.busy = S.game!.mode === 'human_vs_agent' && !anyTurn ? 'thinking' : 'submitting';
     render();
     try {
@@ -621,8 +617,7 @@ async function submitAction(run: () => Promise<{ status: string; error: string |
         S.busy = null;
         await refresh();
         for (const m of res.agent_moves) showToast(describeMove(m.player, m.action, m.tiles?.length ?? 0, m.score_delta));
-        if (hotSeat && !S.game!.game_over) { S.modal = 'handoff'; S.handoffFor = S.game!.current_player; }
-        else if (!res.agent_moves.length && !S.game!.game_over) showToast(okMessage(res));
+        if (!res.agent_moves.length && !S.game!.game_over) showToast(okMessage(res));
         render();
         centerOnLastMove();
         void me;
@@ -785,7 +780,6 @@ function homeHtml(): string {
         ${savedHtml()}
         <div class="modes">
             ${card('human_vs_agent', ico('cpu'), 'Play the Computer', 'Solo. Out-build the bot.')}
-            ${card('human_vs_human', ico('pair'), 'Pass &amp; Play', 'Two players, one screen.')}
             ${card('agent_vs_agent', ico('eye'), 'Watch the Bots', 'Two bots battle it out.')}
             <button class="mode-card" data-act="online">
                 <span class="mode-icon">${ico('globe')}</span>
@@ -831,8 +825,8 @@ function savedHtml(): string {
         const mine = g.players.find(p => p.name === g.seat);
         const theirs = g.players.find(p => p.name !== g.seat);
         const online = g.kind === 'room';
-        const title = online ? `Online · ${g.code}` : g.mode === 'human_vs_agent' ? 'vs Computer' : 'Pass & Play';
-        const opp = online ? (theirs?.label ?? 'Friend') : g.mode === 'human_vs_agent' ? 'Computer' : (theirs?.label ?? theirs?.name ?? '');
+        const title = online ? `Online · ${g.code}` : g.mode === 'human_vs_agent' ? 'vs Computer' : 'Watch the Bots';
+        const opp = online ? (theirs?.label ?? 'Friend') : g.mode === 'human_vs_agent' ? 'Computer' : (theirs?.label ?? theirs?.name ?? 'Bot');
         const state = g.status === 'waiting' ? 'Waiting for a friend to join'
             : online ? (g.your_turn ? 'Your turn' : `${opp}'s turn`) : `${ago(g.updated_at)}`;
         const score = g.status === 'waiting' ? '' : `<span class="score-line">${mine?.score ?? 0}<i>–</i>${theirs?.score ?? 0}</span>`;
@@ -929,7 +923,7 @@ function statusText(g: GameState): string {
         ? (g.current_player === S.online.seat ? 'Your turn' : `Waiting for ${display(g.current_player)}…`)
         : g.mode === 'agent_vs_agent'
         ? `${display(g.current_player)} to move`
-        : g.current_player === actingPlayer() ? (g.mode === 'human_vs_human' ? `${display(g.current_player)}'s turn` : 'Your turn') : '';
+        : g.current_player === actingPlayer() ? 'Your turn' : '';
     // once the last tile is drawn, the other player gets one final turn
     let final = base;
     if (g.final_turn) {
@@ -1171,19 +1165,14 @@ function modalHtml(): string {
             break;
         }
         case 'forfeit': {
-            const opp = g ? (S.online ? display(otherSeat()) : g.mode === 'human_vs_agent' ? 'the Computer' : display(g.players.find(p => p.name !== actingPlayer())?.name ?? 'your opponent')) : 'your opponent';
-            const who = g && g.mode === 'human_vs_human' && !S.online ? `${display(actingPlayer() ?? '')} gives up. ` : '';
-            body = `<h2>Forfeit this game?</h2><p class="muted">${who}It counts as a loss for ${g && g.mode === 'human_vs_human' && !S.online ? display(actingPlayer() ?? '') : 'you'} and a win for ${opp}, whatever the score.</p>
+            const opp = S.online ? display(otherSeat()) : 'the Computer';
+            body = `<h2>Forfeit this game?</h2><p class="muted">It counts as a loss for you and a win for ${opp}, whatever the score.</p>
             <div class="modal-actions"><button class="ghost wide" data-act="close">Keep playing</button><button class="primary danger" data-act="forfeit-confirm">Forfeit</button></div>`;
             break;
         }
         case 'pass':
             body = `<h2>Skip your turn?</h2><p class="muted">You keep your tiles and score nothing.</p>
             <div class="modal-actions"><button class="ghost wide" data-act="close">Cancel</button><button class="primary" data-act="pass-confirm">Pass</button></div>`;
-            break;
-        case 'handoff':
-            body = `<h2>${display(S.handoffFor ?? '')}, you're up</h2><p class="muted">Pass the device. Tiles are hidden until you tap.</p>
-            <button class="primary" data-act="close">I'm ready</button>`;
             break;
         case 'over': {
             if (!g) break;

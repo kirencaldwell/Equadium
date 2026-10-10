@@ -234,8 +234,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 /* ───────────── Modals + toast ───────────── */
 .scrim { position: fixed; inset: 0; background: rgba(6, 14, 12, .55); backdrop-filter: blur(3px); display: grid; place-items: center; padding: 20px; z-index: 10; }
 .scrim.enter { animation: fade .15s; }
-/* hot-seat handoff must fully hide the next player's tiles */
-.scrim.handoff { background: var(--bg); backdrop-filter: none; }
 .modal { width: 100%; max-width: 380px; background: var(--surface); border-radius: 18px; border: 1px solid var(--line); border-top: 3px solid var(--accent); padding: 24px 22px 20px; box-shadow: 0 24px 60px rgba(0, 0, 0, .4); max-height: 90dvh; overflow: auto; }
 .modal h2 { font-family: var(--display); font-weight: 700; font-size: 32px; line-height: 1.05; margin: 0 0 8px; letter-spacing: .005em; }
 .modal .muted { color: var(--muted); margin: 0 0 16px; font-size: 14.5px; }

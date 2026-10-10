@@ -12,7 +12,7 @@ from web.api.store import get_store, now_iso
 logger = logging.getLogger("equadium_store")
 
 # Only games where the signed-in player's result means something count toward stats:
-# solo vs the computer, and online rooms. (Pass & Play has one account on both seats.)
+# solo vs the computer, and online rooms.
 def counts_for_stats(kind: str, mode: str) -> bool:
     return kind == "room" or (kind == "solo" and mode == "human_vs_agent")
 

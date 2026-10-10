@@ -4,13 +4,16 @@ A tile game where players build valid calculus/algebra equations on a crossword-
 
 ## Game modes
 
-All three run on the same engine (`core/session.py`), so what is stress-tested is what the web app serves.
+The modes run on the same engine (`core/session.py`), so what is stress-tested is what the web app serves.
 
 | mode | seats | how |
 |---|---|---|
 | `human_vs_agent` (default) | you vs the search agent | `POST /games/create {"mode": "human_vs_agent"}`; the agent replies automatically after each of your moves |
-| `human_vs_human` | two humans | `POST /games/create {"mode": "human_vs_human"}`; pass `?player=Player1` / `Player2` on `/play`, `/swap`, `/pass` (hot-seat), or join an open game via `/games/{id}/join` |
 | `agent_vs_agent` | two agents | `POST /games/{id}/agent_step` (one turn) or `/autoplay` (whole game) |
+
+Two-player games are played **online** (`POST /rooms`, see below). The two-humans-on-one-screen "Pass & Play" mode has been
+removed: `POST /games/create {"mode": "human_vs_human"}` now returns 400, and old saved Pass & Play games no longer appear in
+the Continue list. (The engine's `human_vs_human` mode still exists because online rooms use it.)
 
 Other endpoints: `GET /modes`, `GET /games/{id}`, `POST /games/{id}/validate_move` (returns a `reason` when illegal).
 A rejected `play` returns `{"status": "failed", "error": "..."}` and does not consume the turn.
@@ -23,7 +26,7 @@ python -m uvicorn web.api.main:app --port 8000      # API
 cd web/frontend && npm install && npm run dev        # UI at http://localhost:3000 (proxies the API)
 ```
 For production, `npm run build` and the API serves `web/frontend/dist` itself.
-Sign-in/online play is paused for now; the home screen offers solo, pass-and-play and bot-watching.
+The home screen offers a game against the computer, watching the bots, and playing a friend online.
 
 ## Accounts, saved games and stats
 
@@ -31,7 +34,7 @@ Playing is open to guests. Signing in with Google adds:
 - **Saved games**: solo games and online rooms are saved after every move and show up under *Your games*
   on any device you sign in on. Guests' solo games stay in memory only; guests' online rooms survive
   restarts but only on the device holding the seat token.
-- **Stats**: every finished game against the computer or a friend (not Pass & Play, not bot-watching) is
+- **Stats**: every finished game against the computer or a friend (not bot-watching) is
   recorded: record, win rate, average and best score, best single play, streak, recent games.
 
 It uses Firebase: **Authentication** for Google sign-in and **Firestore** for the data. Both are on the free
@@ -130,8 +133,7 @@ more turn. `npm run e2e:endgame` checks the messages.
 The flag in the game header lets a player give up (after a confirmation). It ends the game at once as a **loss for
 the forfeiter and a win for the other player, whatever the score**, and it works on either side's turn. In an online
 game the opponent's screen picks it up on its next poll and tells them they won. For signed-in players it is recorded
-like any finished game (a loss, plus a `forfeits` count in `/me/stats`); Pass & Play games stay out of the stats as
-before. API: `POST /games/{id}/forfeit?player=...` and `POST /rooms/{code}/forfeit`. Browser checks:
+like any finished game (a loss, plus a `forfeits` count in `/me/stats`). API: `POST /games/{id}/forfeit?player=...` and `POST /rooms/{code}/forfeit`. Browser checks:
 `npm run e2e:forfeit` (see `web/frontend/e2e/`).
 
 ## Keeping the agent fast
