@@ -181,6 +181,28 @@ def test_fingerprints_agree_with_engine():
     assert checked > 0
 
 
+# ---- calculus tiles inside bigger expressions ----
+@pytest.mark.parametrize("equation,expected", [
+    ("d/dx(x**2)+x=3x", True),                          # a derivative as one term of a sum
+    ("d/dx(x**2)x=2x**2", True),                        # ...or a factor of a product
+    ("d/dx(x**2)+x=2x", False),
+    ("sin(x)int(x**2)=1/3x**3sin(x)+C", True),          # an integral as a factor (its constant chosen as 0)
+    ("sin(x)21/6xx**2+C=sin(x)int(x**2)", True),        # the play that used to be rejected
+    ("int(x)x=1/2x**3+C", True),
+    ("int(x)+int(x)=x**2+C", True),                     # every integral has its own constant
+    ("2int(x)=x**2+C", True),
+    ("int(x)=1/2x**3+C", False),                        # the antiderivative still has to be right
+    ("int(x)x=1/2x**2+C", False),
+    ("int(d/dx(x**2))=x**2+C", True),                   # groups nest in either order
+    ("d/dx(int(x))=x+C", True),
+    ("kint(x)=x**2+C", True),                           # works together with the wild constant k
+    ("d/dx(x**2=3", False),                             # an unclosed group is an error, not a crash
+])
+def test_calculus_inside_bigger_expressions(equation, expected):
+    ok, _ = fresh_session().game.math.validate_equation(equation)
+    assert ok is expected, equation
+
+
 # ---- k, the wild constant ----
 @pytest.mark.parametrize("equation,expected", [
     ("2k=3", True),                    # k = 3/2

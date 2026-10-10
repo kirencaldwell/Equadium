@@ -117,45 +117,41 @@ class MathEngine:
 
         try:
             # Every part of a chain (a = b = c) must equal the first one.
-            # Strip the constant of integration, then compare.
+            # Strip the "+C" tile, then compare. A line may also hold free constants: k, and one for every
+            # integral (see _constants_work), so it is true if SOME choice of them makes every link true.
             parts = [self._CONSTANT.sub("", p.replace(" ", "")) for p in expr_str.split("=")]
-            first = self._parse_expression(parts[0])
-            diffs = [self._parse_expression(part) - first for part in parts[1:]]
+            self._consts, self._collecting = [], True
+            try:
+                first = self._parse_expression(parts[0])
+                diffs = [self._parse_expression(part) - first for part in parts[1:]]
+                consts = list(self._consts)
+            finally:
+                self._collecting = False
             if any(d.has(self.k) for d in diffs):
-                return self._wildcard_k_works(diffs), "Valid"
-            return all(sp.simplify(d) == 0 for d in diffs), "Valid"
-            
+                consts.append(self.k)
+            return self._constants_work(diffs, consts), "Valid"
+
         except Exception as e:
             return False, f"Syntax Error: {e}"
-
-    @staticmethod
-    def _wraps_whole(expr_str, open_idx):
-        """True if the '(' at open_idx closes at the very last character."""
-        depth = 0
-        for i in range(open_idx, len(expr_str)):
-            if expr_str[i] == "(":
-                depth += 1
-            elif expr_str[i] == ")":
-                depth -= 1
-                if depth == 0:
-                    return i == len(expr_str) - 1
-        return False
 
     # "+C" / "-C" as a term of its own: not "+Cx" (a product) or "+C(" (a call)
     _CONSTANT = re.compile(r"[+-]C(?![A-Za-z0-9(*^])")
     _FRACTION_TILE = re.compile(r"^\d/[\dx]$")
     # Tokens that are a value on their own (a term to multiply), as opposed to operators and openers.
-    _VALUE_TILE = re.compile(r"^(?:\d+|\d/[\dx]|[xabkC]|\(x\+[ab]\)|x\*\*\d|e\^x|(?:sin|cos|ln)\(x\))$")
+    _VALUE_TILE = re.compile(r"^(?:Zq\d+|\d+|\d/[\dx]|[xabkC]|\(x\+[ab]\)|x\*\*\d|e\^x|(?:sin|cos|ln)\(x\))$")
 
     def _join_tiles(self, expr_str):
+        return self._join_token_list(self.tokenize(expr_str))
+
+    def _join_token_list(self, tokens):
         """
         Tiles are glued into one string, so neighbouring tiles can blur together: the tiles 2, 1/x, x spell
         "21/xx" (read as 21/(x*x) rather than 2*(1/x)*x), and x**4, 2 spell "x**42" (read as x to the 42nd).
-        Re-tokenise and join the tiles explicitly: fractions get brackets, and two adjacent values are
-        multiplied, digit tiles included (the tiles 2, 2 are 2*2 = 4, not twenty-two).
+        Join the tiles explicitly: fractions get brackets, and two adjacent values are multiplied, digit
+        tiles included (the tiles 2, 2 are 2*2 = 4, not twenty-two).
         """
         out, prev = [], None
-        for t in self.tokenize(expr_str):
+        for t in tokens:
             is_value = bool(self._VALUE_TILE.match(t)) or t in ("exp(",)
             prev_is_value = prev is not None and (bool(self._VALUE_TILE.match(prev)) or prev == ")")
             if is_value and prev_is_value:
@@ -164,43 +160,85 @@ class MathEngine:
             prev = t
         return "".join(out)
 
-    def _wildcard_k_works(self, diffs):
+    # Sample points for (x, a, b) used to find the values of a line's free constants (see _constants_work)
+    _SAMPLES = [(sp.Rational(1, 3), sp.Rational(2, 5), sp.Rational(3, 7)), (sp.Rational(2, 3), sp.Rational(5, 4), sp.Rational(1, 6)),
+                (sp.Rational(5, 7), sp.Rational(3, 2), sp.Rational(7, 5)), (sp.Rational(3, 2), sp.Rational(1, 7), sp.Rational(4, 3)),
+                (sp.Rational(7, 4), sp.Rational(5, 6), sp.Rational(2, 9)), (sp.Rational(9, 5), sp.Rational(4, 7), sp.Rational(5, 8))]
+
+    def _constants_work(self, diffs, consts):
         """
-        k is the "magic constant": a line containing k is valid if SOME single real number, the same for every k
-        on the line, makes every link of the chain true. So 2k = 3 works (k = 3/2) and kx = 3x works (k = 3), but
-        k = x does not (no constant equals x) and kx = 3 does not (k would have to be 3/x).
+        Is there a choice of real values for the free constants `consts` that makes every difference in `diffs`
+        zero for all x, a and b? The free constants are k (the wild constant: 2k = 3 works) and the constant of
+        integration of every integral on the line (so sin(x) * int(x**2) can equal x**3 sin(x)/3, with the
+        constant chosen as 0, or int(x) = x**2/2 + 7).
+
+        With no constants this is just "every difference simplifies to zero". Otherwise the constants are
+        found by solving at a handful of sample points, and the result is then checked symbolically, so a
+        constant that would have to depend on x (k = x, kx = 3) is rejected.
         """
-        k = self.k
-        target = next(d for d in diffs if d.has(k))
+        consts = [c for c in dict.fromkeys(consts) if any(d.has(c) for d in diffs)]
+        if not consts:
+            return all(sp.simplify(d) == 0 for d in diffs)
+        x, a, b = self.x, sp.Symbol("a"), sp.Symbol("b")
+        equations = [d.subs({x: px, a: pa, b: pb}) for d in diffs for px, pa, pb in self._SAMPLES]
         try:
-            candidates = sp.solve(target, k)
+            solutions = sp.solve(equations, consts, dict=True)
         except Exception:
             return False
-        for cand in candidates:
-            cand = sp.simplify(cand)
-            if cand.free_symbols or cand.is_real is not True:   # must be a plain real number, not depend on x, a, b
-                continue
-            if all(sp.simplify(d.subs(k, cand)) == 0 for d in diffs):
+        for sol in solutions:
+            zero = {c: 0 for c in consts}
+            values = {c: sol.get(c, 0) for c in consts}
+            values = {c: v.subs(zero) if hasattr(v, "subs") else v for c, v in values.items()}   # any leftover freedom: use 0
+            if any(sp.sympify(v).free_symbols or sp.sympify(v).is_real is not True for v in values.values()):
+                continue                                                      # a constant must be a plain real number
+            if all(sp.simplify(d.subs(values)) == 0 for d in diffs):
                 return True
         return False
 
     def _parse_expression(self, expr_str):
-        return self._parse_grouped(self._join_tiles(expr_str))
+        if not getattr(self, "_collecting", False):
+            self._consts = []
+        return self._parse_token_list(self.tokenize(expr_str))
 
-    def _parse_grouped(self, expr_str):
-        """
-        Strips out custom calculus tile wrappers, parses the inner algebra 
-        with implicit multiplication allowed, and applies the calculus operation.
-        """
-        # Normalize e**x and e^x to SymPy's exp(x)
-        expr_str = expr_str.replace("e**x", "exp(x)").replace("e^x", "exp(x)")
-        
-        expr_str = expr_str.strip()
-        for opener, operation in (("d/dx(", sp.diff), ("int(", sp.integrate)):
-            if expr_str.startswith(opener) and self._wraps_whole(expr_str, len(opener) - 1):
-                # The wrapper may itself contain another wrapper (d/dx(d/dx(x**3)) is a
-                # second derivative), so evaluate the inside recursively.
-                return operation(self._parse_grouped(expr_str[len(opener):-1]), self.x)
+    _OPENERS = ("d/dx(", "int(", "exp(", "(")
 
-        # Standard algebraic expressions
-        return parse_expr(expr_str, transformations=self.transformations)
+    def _closing_index(self, tokens, start):
+        """Index of the ")" that closes the opener at tokens[start]."""
+        depth = 0
+        for i in range(start, len(tokens)):
+            if tokens[i] in self._OPENERS:
+                depth += 1
+            elif tokens[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    return i
+        raise ValueError(f"'{tokens[start]}' is never closed")
+
+    def _parse_token_list(self, tokens):
+        """
+        Parses a run of tiles. A d/dx( ) or int( ) group may sit anywhere in it, not only around a whole side:
+        each group is worked out on its own (groups nest: d/dx(d/dx(x**3)) is a second derivative) and stands in
+        for the number or expression it produces, so d/dx(x**2) + x and sin(x) * int(x**2) both make sense.
+        An integral comes with a fresh constant of integration (see _constants_work).
+        """
+        out, env, i = [], {}, 0
+        while i < len(tokens):
+            t = tokens[i]
+            if t in ("d/dx(", "int("):
+                j = self._closing_index(tokens, i)
+                inner = self._parse_token_list(tokens[i + 1:j])
+                if t == "d/dx(":
+                    value = sp.diff(inner, self.x)
+                else:
+                    c = sp.Symbol(f"_C{len(self._consts)}")
+                    self._consts.append(c)
+                    value = sp.integrate(inner, self.x) + c
+                name = f"Zq{len(env)}"
+                env[name] = value
+                out.append(name)
+                i = j + 1
+            else:
+                out.append(t)
+                i += 1
+        text = self._join_token_list(out).replace("e**x", "exp(x)").replace("e^x", "exp(x)")
+        return parse_expr(text, local_dict=env, transformations=self.transformations)
