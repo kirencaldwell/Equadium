@@ -163,13 +163,20 @@ class MathEngine:
 
     @staticmethod
     def _strip_constant_terms(tokens):
-        """Removes "+C" / "-C" when it is a term of its own (not "+Cx", a product). Returns (tokens, found)."""
+        """
+        Removes the constant of integration when it is a term of its own, wherever it sits: "+C", "-C", or a bare
+        leading "C" (at the start of a side or of a bracket, as in "C-x"). Not "+Cx", a product. Returns (tokens, found).
+        """
         out, found, i = [], False, 0
         while i < len(tokens):
-            nxt = tokens[i + 2] if i + 2 < len(tokens) else None
-            if tokens[i] in ("+", "-") and i + 1 < len(tokens) and tokens[i + 1] == "C" and nxt in (None, "+", "-", ")"):
+            ends_term = lambda j: j >= len(tokens) or tokens[j] in ("+", "-", ")")
+            if tokens[i] in ("+", "-") and i + 1 < len(tokens) and tokens[i + 1] == "C" and ends_term(i + 2):
                 found = True
                 i += 2
+                continue
+            if tokens[i] == "C" and (i == 0 or tokens[i - 1] == "(") and ends_term(i + 1):
+                found = True
+                i += 1
                 continue
             out.append(tokens[i])
             i += 1
