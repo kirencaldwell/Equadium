@@ -182,7 +182,7 @@ def test_fingerprints_agree_with_engine():
 
 
 # ---- the end of the game: the last tile is drawn, then one final turn ----
-FULL = ["="] + ["x"] * 14        # a full rack: playing "=" and one "x" draws exactly two tiles to refill it
+FULL = ["="] + ["x"] * (CONFIG["max_rack_size"] - 1)    # a full rack: playing "=" and one "x" draws exactly two tiles to refill it
 
 
 def _bag_with(session, n):

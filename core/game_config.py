@@ -3,7 +3,7 @@ import random
 
 CONFIG = {
     "board_dimensions": (25, 25),
-    "max_rack_size": 15,
+    "max_rack_size": 16,
     "require_plus_c": True,
     "max_turns": 75,
     "stall_rounds": 3,  # game ends after this many full rounds with no tiles played (0 = off)

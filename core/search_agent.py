@@ -4,7 +4,7 @@ search_agent.py
 An agent that finds plays by searching from the *current rack* each turn,
 instead of consulting a precomputed table of every expression the tile set can
 make (core/math_playbook.py). The table grows as (tile types)^(length); this
-search grows with the rack (<= 15 tiles) and a depth knob.
+search grows with the rack (<= 16 tiles) and a depth knob.
 
 How a turn works
   1. Pool: enumerate every grammar-valid expression the rack can spell (up to
