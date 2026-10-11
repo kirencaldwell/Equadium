@@ -377,3 +377,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .preview .eqs .sep { display: block; height: 4px; }
 .actions .primary { white-space: nowrap; }
 @media (max-width: 480px) { .actions .primary { padding-inline: 8px; font-size: 16px; letter-spacing: .02em; } }
+
+/* a section that could not load says so, with a way to retry */
+.load-error { display: grid; gap: 10px; justify-items: center; text-align: center; padding: 14px 16px; border-radius: 14px; border: 1px dashed var(--line); color: var(--muted); font-size: 14px; }
+.load-error p { margin: 0; }
+.load-error .primary, .load-error .ghost { flex: none; width: auto; padding: 9px 22px; }

@@ -849,3 +849,50 @@ def test_old_pass_and_play_games_are_hidden_from_the_continue_list(env):
     env.save_game(old)
     ids = [g["id"] for g in client.get("/me/games", headers=H()).json()["games"]]
     assert keep in ids and "old-hotseat" not in ids
+
+
+def test_stats_report_a_storage_failure_instead_of_zeros(env, monkeypatch):
+    gid = new_game(H())
+    client.post(f"/games/{gid}/forfeit", params={"player": "Human"}, headers=H())
+    assert client.get("/me/stats", headers=H()).json()["games"] == 1
+
+    def boom(*a, **k):
+        raise RuntimeError("firestore timed out")
+    with monkeypatch.context() as m:
+        m.setattr(env, "list_results", boom)
+        r = client.get("/me/stats", headers=H())
+    assert r.status_code == 503                                  # not {"games": 0, ...}
+    assert client.get("/me/stats", headers=H()).json()["games"] == 1
+
+
+def test_a_store_that_failed_to_start_does_not_pass_for_an_empty_account(monkeypatch):
+    """Firestore configured but down: play continues from memory, but /me answers 503 (not 'no games, no stats'),
+    and Firestore is tried again shortly instead of staying on memory until the next restart."""
+    import time as _time
+    from web.api import store as store_mod
+    set_store(None)
+    monkeypatch.setenv("FIREBASE_PROJECT_ID", PID)
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/somewhere/firebase.json")
+    attempts = []
+    working = FirestoreStore(client=FakeFirestore())
+
+    def flaky(*a, **k):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise RuntimeError("credentials not readable yet")
+        return working
+    monkeypatch.setattr(store_mod, "FirestoreStore", flaky)
+
+    safe = TestClient(main.app, raise_server_exceptions=False)
+    assert safe.post("/games/create", json={"mode": "human_vs_agent"}, headers=H()).status_code == 200   # play still works
+    assert store_mod.get_store().degraded
+    assert safe.get("/me/games", headers=H()).status_code == 503
+    assert safe.get("/me/stats", headers=H()).status_code == 503
+    assert safe.get("/me", headers=H()).json()["saving"] == "memory"          # the app's existing warning still fires
+    assert len(attempts) == 1                                                  # not retried on every request
+
+    monkeypatch.setattr(store_mod, "_retry_firestore_at", _time.time() - 1)   # 30 seconds later
+    assert store_mod.get_store() is working and len(attempts) == 2
+    assert safe.get("/me/games", headers=H()).status_code == 200
+    assert safe.get("/me/stats", headers=H()).status_code == 200
+    set_store(None)

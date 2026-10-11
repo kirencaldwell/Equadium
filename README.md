@@ -58,6 +58,11 @@ saves again on the next move.
 
 Without any of this the app still works as guest-only.
 
+If Firestore is configured but fails to start (for example while the host is waking up), the API keeps games playable from
+memory but marks the store *degraded*: `/me/games` and `/me/stats` answer **503** rather than an empty list, the app shows
+"couldn't load" with a retry (and retries by itself), and the API tries Firestore again every 30 seconds instead of staying
+on memory until the next restart. `npm run e2e:loading` covers the app side.
+
 ### Developing against the Firestore emulator
 ```
 npx firebase-tools emulators:start --only firestore          # needs Java; listens on 127.0.0.1:8080

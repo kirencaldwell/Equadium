@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -34,6 +35,7 @@ def now_iso() -> str:
 
 class Store:
     enabled = False
+    degraded = False    # True for the in-memory stand-in used while Firestore is configured but not working
 
     def save_game(self, rec: dict) -> None: raise NotImplementedError
     def get_game(self, game_id: Optional[str] = None, code: Optional[str] = None) -> Optional[dict]: raise NotImplementedError
@@ -227,22 +229,37 @@ class FirestoreStore(Store):
 
 
 _store: Optional[Store] = None
+_retry_firestore_at = 0.0
+RETRY_AFTER_SECONDS = 30.0
+
+
+def _firestore_configured() -> bool:
+    return bool(os.getenv("FIREBASE_PROJECT_ID") and (
+        os.getenv("FIREBASE_SERVICE_ACCOUNT") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("FIRESTORE_EMULATOR_HOST")))
 
 
 def get_store() -> Store:
-    global _store
+    """
+    The store the API talks to. If Firestore is configured but fails to start (credentials not readable yet, a
+    transient error while the host is waking up) the API keeps serving games from memory so play isn't broken, but
+    that store is marked `degraded`: account endpoints answer 503 instead of pretending the player has no games or
+    stats, and Firestore is tried again every 30 seconds rather than staying on memory until the next restart.
+    """
+    global _store, _retry_firestore_at
+    if _store is not None and getattr(_store, "degraded", False) and time.time() >= _retry_firestore_at:
+        _store = None
     if _store is None:
-        pid = os.getenv("FIREBASE_PROJECT_ID")
-        creds = os.getenv("FIREBASE_SERVICE_ACCOUNT")
-        if pid and (creds or os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("FIRESTORE_EMULATOR_HOST")):
+        if _firestore_configured():
             try:
-                _store = FirestoreStore(pid, creds)
-                logger.info("Saving games to Firestore (project %s)", pid)
+                _store = FirestoreStore(os.getenv("FIREBASE_PROJECT_ID"), os.getenv("FIREBASE_SERVICE_ACCOUNT"))
+                logger.info("Saving games to Firestore (project %s)", os.getenv("FIREBASE_PROJECT_ID"))
             except Exception:
-                # Bad or missing credentials must not take the whole game down: keep playing from memory.
                 logger.exception("FIRESTORE IS CONFIGURED BUT FAILED TO START (check FIREBASE_SERVICE_ACCOUNT / "
-                                 "GOOGLE_APPLICATION_CREDENTIALS). Games will NOT be saved until this is fixed.")
+                                 "GOOGLE_APPLICATION_CREDENTIALS). Games will NOT be saved until this is fixed; retrying in %ds.",
+                                 RETRY_AFTER_SECONDS)
                 _store = MemoryStore()
+                _store.degraded = True
+                _retry_firestore_at = time.time() + RETRY_AFTER_SECONDS
         else:
             _store = MemoryStore()
             logger.info("Firestore not configured; saved games live in memory only")
