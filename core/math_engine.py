@@ -48,7 +48,8 @@ class MathEngine:
             return False, "Empty expression"
 
         BINARY_OPERATORS = {"+", "*", "-"}
-        START_BOUNDARIES = {"d/dx(", "int("}
+        START_BOUNDARIES = {"d/dx(", "int(", "exp(", "("}
+        OPENERS = {"d/dx(", "int(", "exp(", "("}
 
         # Split by "=" if present
         if "=" in tokens:
@@ -77,6 +78,20 @@ class MathEngine:
         if tokens[-1] in BINARY_OPERATORS:
             return False, f"Expression ends with operator '{tokens[-1]}'"
 
+        # Brackets must balance, and a group can't be empty: "(x+1)" and "d/dx(x)" yes, "(x" and "()" no.
+        depth = 0
+        for idx, token in enumerate(tokens):
+            if token in OPENERS:
+                depth += 1
+                if idx + 1 < len(tokens) and tokens[idx + 1] == ")":
+                    return False, "Empty brackets"
+            elif token == ")":
+                depth -= 1
+                if depth < 0:
+                    return False, "A ')' has no matching opening bracket"
+        if depth != 0:
+            return False, "A bracket is never closed"
+
         for idx in range(len(tokens)):
             token = tokens[idx]
 
@@ -86,7 +101,7 @@ class MathEngine:
                 if next_token in BINARY_OPERATORS:
                     return False, f"Consecutive operators '{token}' and '{next_token}'"
 
-            # Rule 4: No operator immediately following d/dx( or int(
+            # Rule 4: No operator immediately following d/dx(, int(, exp( or (
             if token in START_BOUNDARIES and idx + 1 < len(tokens):
                 next_token = tokens[idx + 1]
                 if next_token in BINARY_OPERATORS and next_token != "-":
@@ -110,20 +125,32 @@ class MathEngine:
         if not is_gram_valid:
             return False, f"Invalid grammar: {gram_msg}"
 
-        # An integral needs its constant of integration: "+C", or "-C" (the same family of antiderivatives).
-        if "int(" in expr_str and self.config["require_plus_c"]:
-            if not self._CONSTANT.search(expr_str.replace(" ", "")):
-                return False, "Missing constant of integration (+C or -C)"
+        parts, cur = [], []
+        for t in tokens:
+            if t == "=":
+                parts.append(cur)
+                cur = []
+            else:
+                cur.append(t)
+        parts.append(cur)
+
+        # The "+C" / "-C" tiles are the constant of integration. Take them out; an integral needs one.
+        found = False
+        stripped = []
+        for part in parts:
+            part, has_constant = self._strip_constant_terms(part)
+            found = found or has_constant
+            stripped.append(part)
+        if "int(" in tokens and self.config["require_plus_c"] and not found:
+            return False, "Missing constant of integration (+C or -C)"
 
         try:
-            # Every part of a chain (a = b = c) must equal the first one.
-            # Strip the "+C" tile, then compare. A line may also hold free constants: k, and one for every
-            # integral (see _constants_work), so it is true if SOME choice of them makes every link true.
-            parts = [self._CONSTANT.sub("", p.replace(" ", "")) for p in expr_str.split("=")]
+            # Every part of a chain (a = b = c) must equal the first one. A line may also hold free constants: k, and
+            # one for every integral (see _constants_work), so it is true if SOME choice of them makes every link true.
             self._consts, self._collecting = [], True
             try:
-                first = self._parse_expression(parts[0])
-                diffs = [self._parse_expression(part) - first for part in parts[1:]]
+                first = self._parse_token_list(stripped[0])
+                diffs = [self._parse_token_list(part) - first for part in stripped[1:]]
                 consts = list(self._consts)
             finally:
                 self._collecting = False
@@ -134,11 +161,25 @@ class MathEngine:
         except Exception as e:
             return False, f"Syntax Error: {e}"
 
+    @staticmethod
+    def _strip_constant_terms(tokens):
+        """Removes "+C" / "-C" when it is a term of its own (not "+Cx", a product). Returns (tokens, found)."""
+        out, found, i = [], False, 0
+        while i < len(tokens):
+            nxt = tokens[i + 2] if i + 2 < len(tokens) else None
+            if tokens[i] in ("+", "-") and i + 1 < len(tokens) and tokens[i + 1] == "C" and nxt in (None, "+", "-", ")"):
+                found = True
+                i += 2
+                continue
+            out.append(tokens[i])
+            i += 1
+        return out, found
+
     # "+C" / "-C" as a term of its own: not "+Cx" (a product) or "+C(" (a call)
     _CONSTANT = re.compile(r"[+-]C(?![A-Za-z0-9(*^])")
     _FRACTION_TILE = re.compile(r"^\d/[\dx]$")
     # Tokens that are a value on their own (a term to multiply), as opposed to operators and openers.
-    _VALUE_TILE = re.compile(r"^(?:Zq\d+|\d+|\d/[\dx]|[xabkC]|\(x\+[ab]\)|x\*\*\d|e\^x|(?:sin|cos|ln)\(x\))$")
+    _VALUE_TILE = re.compile(r"^(?:Zq\d+|\d+|\d/[\dx]|[xabkCi]|\(x\+[ab]\)|x\*\*\d|e\^x|(?:sin|cos|ln)\(x\))$")
 
     def _join_tiles(self, expr_str):
         return self._join_token_list(self.tokenize(expr_str))
@@ -152,7 +193,7 @@ class MathEngine:
         """
         out, prev = [], None
         for t in tokens:
-            is_value = bool(self._VALUE_TILE.match(t)) or t in ("exp(",)
+            is_value = bool(self._VALUE_TILE.match(t)) or t in ("exp(", "(")     # starts a term of its own
             prev_is_value = prev is not None and (bool(self._VALUE_TILE.match(prev)) or prev == ")")
             if is_value and prev_is_value:
                 out.append("*")
@@ -164,6 +205,31 @@ class MathEngine:
     _SAMPLES = [(sp.Rational(1, 3), sp.Rational(2, 5), sp.Rational(3, 7)), (sp.Rational(2, 3), sp.Rational(5, 4), sp.Rational(1, 6)),
                 (sp.Rational(5, 7), sp.Rational(3, 2), sp.Rational(7, 5)), (sp.Rational(3, 2), sp.Rational(1, 7), sp.Rational(4, 3)),
                 (sp.Rational(7, 4), sp.Rational(5, 6), sp.Rational(2, 9)), (sp.Rational(9, 5), sp.Rational(4, 7), sp.Rational(5, 8))]
+
+    def _is_zero(self, d):
+        """
+        Is the expression d zero for every x, a and b? SymPy's simplify settles most things, but it can miss identities
+        that involve complex numbers (exp(ix) = cos(x) + i sin(x)), so when it is not sure the expression is also
+        rewritten in terms of exp and, failing that, compared numerically at several points.
+        """
+        if sp.simplify(d) == 0:
+            return True
+        if not d.has(sp.I):
+            return False
+        try:
+            if sp.simplify(d.rewrite(sp.exp)) == 0:
+                return True
+        except Exception:
+            pass
+        x, a, b = self.x, sp.Symbol("a"), sp.Symbol("b")
+        try:
+            for px, pa, pb in self._SAMPLES:
+                value = complex(sp.N(d.subs({x: px, a: pa, b: pb}), 30))
+                if not abs(value) < 1e-9:                                  # also false for nan
+                    return False
+            return True
+        except Exception:
+            return False
 
     def _constants_work(self, diffs, consts):
         """
@@ -179,7 +245,7 @@ class MathEngine:
         """
         consts = [c for c in dict.fromkeys(consts) if any(d.has(c) for d in diffs)]
         if not consts:
-            return all(sp.simplify(d) == 0 for d in diffs)
+            return all(self._is_zero(d) for d in diffs)
         x, a, b = self.x, sp.Symbol("a"), sp.Symbol("b")
         equations = [d.subs({x: px, a: pa, b: pb}) for d in diffs for px, pa, pb in self._SAMPLES]
         try:
@@ -196,7 +262,7 @@ class MathEngine:
                     continue                                                  # a constant must be a plain real number
                 if self.k in values and values[self.k] == 0:
                     continue
-                if all(sp.simplify(d.subs(values)) == 0 for d in diffs):
+                if all(self._is_zero(d.subs(values)) for d in diffs):
                     return True
         return False
 
@@ -246,4 +312,4 @@ class MathEngine:
                 out.append(t)
                 i += 1
         text = self._join_token_list(out).replace("e**x", "exp(x)").replace("e^x", "exp(x)")
-        return parse_expr(text, local_dict=env, transformations=self.transformations)
+        return parse_expr(text, local_dict={**env, "i": sp.I}, transformations=self.transformations)

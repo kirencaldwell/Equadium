@@ -244,7 +244,7 @@ class SearchAgent:
         return Move(tiles_to_swap=self._choose_swap(player))
 
     # Tiles that are only useful in small numbers: more than this many are dead weight.
-    _KEEP_AT_MOST = {"C": 1, ")": 2, "exp(": 1, "d/dx(": 1, "int(": 1, "+": 2, "=": 1}
+    _KEEP_AT_MOST = {"C": 1, ")": 2, "exp(": 1, "d/dx(": 1, "int(": 1, "+": 2, "=": 1, "i": 0, "(": 1}   # the agent never plays i yet
 
     def _choose_swap(self, player):
         """Throw back surplus tiles of types we can't use many of, plus
@@ -312,13 +312,13 @@ class SearchAgent:
         Also returns by_len for the short anchor-companion expressions.
         """
         usable = {s: n for s, n in rack_symbols.items()
-                  if s in self.value_tiles or s in ("+", "-", "exp(", ")")}
+                  if s in self.value_tiles or s in ("+", "-", "exp(", "(", ")")}
         symbols = sorted(usable)
         pool: Dict[tuple, list] = defaultdict(list)
         short: List[tuple] = []
         counts = dict(usable)
         zero = (0.0,) * K
-        frames: List[tuple] = []  # open exp( groups: (outer_total, outer_term, outer_neg)
+        frames: List[tuple] = []  # open exp( or ( groups: (outer_total, outer_term, outer_neg, is_exp)
 
         nodes = [0]
 
@@ -350,7 +350,7 @@ class SearchAgent:
                         continue
                 elif s == "-":
                     # binary after a value, or a sign at the very start of an expression / bracket
-                    if n >= max_len or not (last_is_value or prev is None or prev == "exp("):
+                    if n >= max_len or not (last_is_value or prev is None or prev in ("exp(", "(")):
                         continue
                 else:  # value tile or exp(
                     if n >= max_len or (last_is_value and (prev, s) in bad_pairs):
@@ -364,20 +364,20 @@ class SearchAgent:
                         dfs(tokens, n + 1, tuple(t + p for t, p in zip(total, term)), None, False, True, True)
                     else:
                         dfs(tokens, n + 1, total, None, False, has_plus, True)
-                elif s == "exp(":
-                    frames.append((total, term, neg))
+                elif s in ("exp(", "("):
+                    frames.append((total, term, neg, s == "exp("))
                     dfs(tokens, n, zero, None, False, has_plus)
                     frames.pop()
                 elif s == ")":
-                    outer_total, outer_term, outer_neg = frames.pop()
+                    outer_total, outer_term, outer_neg, is_exp = frames.pop()
                     inner = tuple(t + p for t, p in zip(total, term))
-                    val = tuple(math.exp(v) if v < 50 else math.inf for v in inner)
+                    val = tuple(math.exp(v) if v < 50 else math.inf for v in inner) if is_exp else inner
                     if outer_term is not None:
                         new_term = tuple(p * q for p, q in zip(outer_term, val))
                     else:
                         new_term = tuple(-v for v in val) if outer_neg else val
                     dfs(tokens, n, outer_total, new_term, True, has_plus)
-                    frames.append((outer_total, outer_term, outer_neg))
+                    frames.append((outer_total, outer_term, outer_neg, is_exp))
                 else:
                     v = self.value_tiles[s]
                     if term is not None:

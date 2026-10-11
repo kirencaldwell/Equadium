@@ -7,7 +7,7 @@ export function tileKind(symbol: string): 'calc' | 'fn' | 'eq' | 'var' | 'num' |
     if (symbol === 'd/dx(' || symbol === 'int(') return 'calc';
     if (symbol === '=') return 'eq';
     if (['e^x', 'exp(', 'sin(x)', 'cos(x)', 'ln(x)'].includes(symbol)) return 'fn';
-    if (['x', 'a', 'b', 'k', 'C', '(x+a)', '(x+b)', 'x**2', 'x**3', 'x**4'].includes(symbol)) return 'var';
+    if (['x', 'a', 'b', 'k', 'i', 'C', '(x+a)', '(x+b)', 'x**2', 'x**3', 'x**4'].includes(symbol)) return 'var';
     if (/^\d/.test(symbol)) return 'num';
     return 'op';
 }

@@ -1162,6 +1162,7 @@ function modalHtml(): string {
             <ol class="rules">
                 <li><b>Build equations</b> across and down, like a crossword. Both sides must be equal: <span class="eg">${equation('x+x=2x')}</span>. Chains work too: <span class="eg">${equation('2+2=4=2x+4-2x')}</span></li>
                 <li>Every play must <b>connect</b> to tiles already on the board.</li>
+                <li><span class="eg">i</span> is the imaginary unit (<span class="eg">${equation('ii=-1')}</span>), so you can build identities like <span class="eg">${equation('exp(ix)=cos(x)+isin(x)')}</span>. <span class="eg">(</span> and <span class="eg">)</span> group tiles: <span class="eg">${equation('(x+1)(x-1)=xx-1')}</span>.</li>
                 <li>You get <b>one free <span class="eg">=</span></b> each turn.</li>
                 <li><span class="eg">k</span> is <b>whatever constant you need it to be</b> (but never 0), and worth 0 points: <span class="eg">${equation('2k=3')}</span> works.</li>
                 <li><span class="eg">${equation('d/dx(')}</span> and <span class="eg">${equation('int(')}</span> tiles multiply your score by <b>×2</b> and <b>×3</b>. An integral needs <span class="eg">+C</span> (or <span class="eg">−C</span>). Stack two <span class="eg">${equation('d/dx(')}</span> tiles for a second derivative and <b>×4</b>. They can sit inside bigger expressions too: <span class="eg">${equation('d/dx(x**2)+x=3x')}</span>.</li>

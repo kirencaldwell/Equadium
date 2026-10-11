@@ -278,6 +278,36 @@ def test_calculus_inside_bigger_expressions(equation, expected):
     assert ok is expected, equation
 
 
+# ---- the i tile and the ( tile ----
+@pytest.mark.parametrize("equation,expected", [
+    ("ii=-1", True), ("iii=-i", True), ("ii=1", False),
+    ("exp(ix)=cos(x)+isin(x)", True),                    # Euler's formula
+    ("exp(ix)=cos(x)+sin(x)", False),
+    ("2isin(x)=exp(ix)-exp(-ix)", True),                 # sin and cos in terms of exp, no division needed
+    ("2cos(x)=exp(ix)+exp(-ix)", True),
+    ("2cos(x)=exp(ix)-exp(-ix)", False),
+    ("exp(ix)exp(-ix)=1", True),
+    ("d/dx(exp(ix))=iexp(ix)", True),
+    ("ki=2i", True), ("kk=ii", False),                   # k is real and non-zero
+    ("(x+1)(x-1)=xx-1", True),                           # ( ) group tiles
+    ("2(x+1)=2x+2", True), ("x(x+1)=xx+x", True),       # a group next to a value multiplies, never "calls" it
+    ("d/dx((x+1)(x+1))=2x+2", True),
+    ("(-x)=-x", True),
+    ("int(x)=(1/2x**2+C)", True),                        # +C may sit inside a group
+    ("int(x)=(1/2x**2)", False),
+    ("(x+1=x", False), ("x+1)=x", False), ("()x=x", False), ("(+x)=x", False), ("(x=x)", False),
+])
+def test_imaginary_unit_and_brackets(equation, expected):
+    ok, _ = fresh_session().game.math.validate_equation(equation)
+    assert ok is expected, equation
+
+
+def test_bracket_and_i_tiles_exist():
+    assert CONFIG["tiles"]["i"] == {"count": 3, "points": 5}
+    assert CONFIG["tiles"]["("]["count"] > 0 and CONFIG["tiles"][")"]["count"] > CONFIG["tiles"]["("]["count"]
+    assert CONFIG["tiles"]["("]["points"] == 0
+
+
 # ---- the "1" tile ----
 def test_one_tile_exists_and_lets_basic_calculus_be_spelled():
     assert CONFIG["tiles"]["1"] == {"count": 8, "points": 1}

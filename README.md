@@ -124,6 +124,14 @@ precomputed table (`core/math_playbook.py`, kept as a baseline: it grows as tile
 table takes many minutes to build). It enumerates what the rack can spell, fingerprints each expression
 numerically, and joins equal fingerprints (meet in the middle); SymPy only verifies the final candidates.
 
+## The `i` and `(` tiles
+
+`i` is the imaginary unit (3 copies, 5 points): `ii = −1`, `exp(ix) = cos(x) + i·sin(x)`, `2i·sin(x) = exp(ix) − exp(−ix)`.
+`(` is a plain bracket (6 copies, 0 points; `)` has 18) that groups any run of tiles: `(x+1)(x−1) = xx−1`. Next to a value a
+group multiplies it, and `+C` may sit inside a group. Lines containing `i` are checked symbolically with a numeric
+fallback (SymPy alone misses identities like Euler's). Brackets must balance and can't be empty. The computer plays
+brackets but not `i` yet (it swaps `i` tiles away).
+
 ## How a game ends
 
 The game ends when the **last tile is drawn from the bag**: the player who drew it has had their turn, and the other player
