@@ -278,6 +278,21 @@ def test_calculus_inside_bigger_expressions(equation, expected):
     assert ok is expected, equation
 
 
+# ---- the "1" tile ----
+def test_one_tile_exists_and_lets_basic_calculus_be_spelled():
+    assert CONFIG["tiles"]["1"] == {"count": 8, "points": 1}
+    math = fresh_session().game.math
+    for equation in ("d/dx(x)=1", "d/dx(x+1)=1", "int(1)=x+C", "x+1=1+x", "1/2+1/2=1"):
+        assert math.validate_equation(equation)[0], equation
+    assert not math.validate_equation("x+1=x")[0]
+    assert math.tokenize("11/x1/21") == ["1", "1/x", "1/2", "1"]           # 1 next to 1/x and 1/2 is read tile by tile
+
+
+def test_one_next_to_a_fraction_tile_multiplies():
+    math = fresh_session().game.math
+    assert math.validate_equation("11/x=1/x")[0] and math.validate_equation("1x=x1")[0]
+
+
 # ---- k, the wild constant ----
 @pytest.mark.parametrize("equation,expected", [
     ("2k=3", True),                    # k = 3/2
