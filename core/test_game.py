@@ -370,6 +370,8 @@ def test_k_is_worth_nothing():
     ("int(x)=C-1/2x**2", False),                # ...but the rest still has to be the right antiderivative
     ("int(x)=C-kx**2", True),                   # (k = -1/2)
     ("int(x)=Cx", False),                       # a leading "Cx" is still a product
+    ("int(x)+C=1/2x**2", True),                 # C anywhere in the line satisfies the requirement
+    ("C+int(x)=C+1/2x**2+C", True),
 ])
 def test_integral_constant(equation, expected):
     ok, _ = fresh_session().game.math.validate_equation(equation)
