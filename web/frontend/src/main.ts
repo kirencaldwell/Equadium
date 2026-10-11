@@ -1179,6 +1179,14 @@ function modalHtml(): string {
                 <li><b>Sums</b> go term by term: <span class="eg">${equation('d/dx(x**2+x)=2x+1')}</span></li>
                 <li>Every integral needs <span class="eg">+C</span> (or <span class="eg">−C</span>).</li>
             </ul>
+            <h3 class="ct-sub">Identities with <span class="eg">i</span></h3>
+            <ul class="rules calc-rules">
+                <li><span class="eg">${equationFromTiles(['i', 'i', '=', '-', '1'])}</span></li>
+                <li>Euler: <span class="eg">${equationFromTiles(['exp(', 'i', 'x', ')', '=', 'cos(x)', '+', 'i', 'sin(x)'])}</span></li>
+                <li><span class="eg">${equationFromTiles(['2', 'i', 'sin(x)', '=', 'exp(', 'i', 'x', ')', '-', 'exp(', '-', 'i', 'x', ')'])}</span></li>
+                <li><span class="eg">${equationFromTiles(['2', 'cos(x)', '=', 'exp(', 'i', 'x', ')', '+', 'exp(', '-', 'i', 'x', ')'])}</span></li>
+                <li>Group with <span class="eg">(</span> and <span class="eg">)</span>: <span class="eg">${equationFromTiles(['(', 'x', '+', '1', ')', '(', 'x', '-', '1', ')', '=', 'x', 'x', '-', '1'])}</span></li>
+            </ul>
             <button class="primary" data-act="close">Close</button>`;
             break;
         case 'swap': {
