@@ -11,6 +11,14 @@ from web.api.auth import AuthUser, auth_enabled, require_user
 from web.api.store import get_store
 
 router = APIRouter(prefix="/me", tags=["account"])
+
+
+def _account_store():
+    """The store for account data, or a 503 if it is only a stand-in: an empty answer would look like 'no games'."""
+    store = get_store()
+    if getattr(store, "degraded", False):
+        raise HTTPException(status_code=503, detail="Your saved games are temporarily unavailable. Try again in a moment.")
+    return store
 logger = logging.getLogger("equadium_store")
 
 STALE_AFTER_DAYS = 30   # abandoned games stop cluttering the Continue list
@@ -38,8 +46,9 @@ def _age_days(iso: str) -> float:
 def my_games(user: AuthUser = Depends(require_user)):
     """Unfinished games to resume on any device. Room entries include the seat token, which is
     safe to hand back because the caller has proven (via their JWT) that they own that seat."""
+    store = _account_store()
     try:
-        recs = get_store().list_user_games(user.id)
+        recs = store.list_user_games(user.id)
     except Exception:
         # Say so instead of answering "no games": an empty 200 made the app wipe the player's list on a
         # transient storage hiccup (a cold start, a timeout), and the games only came back on a later fetch.
@@ -69,9 +78,11 @@ def my_games(user: AuthUser = Depends(require_user)):
 
 @router.get("/stats")
 def my_stats(user: AuthUser = Depends(require_user)):
+    store = _account_store()
     try:
-        rows = get_store().list_results(user.id)
+        rows = store.list_results(user.id)
     except Exception:
+        # Say so rather than answering with zeros: an empty 200 made the app show "no stats" on a storage hiccup.
         logger.exception("Could not load stats for %s", user.id)
-        rows = []
+        raise HTTPException(status_code=503, detail="Couldn't load your stats right now. Try again in a moment.")
     return persistence.compute_stats(rows)

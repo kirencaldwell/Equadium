@@ -55,6 +55,8 @@ const S = {
     user: null as User | null,           // signed-in player (null = guest)
     saved: [] as SavedGame[],            // unfinished games to resume (signed-in only)
     stats: null as Stats | null,
+    statsError: '' as string,            // why the stats couldn't be loaded (shown with a retry), '' when fine
+    savedStatus: 'ok' as 'ok' | 'loading' | 'error',   // how the last attempt to load the Continue list went
     push: null as PushStatus | null,     // turn notifications on this device (null until known / signed out)
     online: null as null | OnlineSeat,   // set while playing a remote game
     version: 0,                          // last server version seen (online polling)
@@ -326,37 +328,53 @@ async function openSolo(id: string, push = true) {
 // Accounts: saved games and stats
 // ─────────────────────────────────────────────
 let savedSeq = 0;
+let savedRetryTimer = 0;
+let savedAttempt = 0;
+const SAVED_RETRY_MS = [3000, 6000, 12000, 24000, 45000];
+
 /**
  * Refreshes the "Continue" list. Several things call this (showing the menu, finishing a game, signing in), so
- * answers can arrive out of order: only the newest request may update the list. A failed request leaves the
- * list as it was (never blank it) and is retried once shortly after.
+ * answers can arrive out of order: only the newest request may update the list. A failed request never blanks a
+ * list we already have; it is shown as "couldn't load" (not as "no games") and retried with growing gaps, so a
+ * server that is still waking up gets picked up as soon as it answers.
  */
-async function loadSavedGames(retry = true) {
-    if (!S.user) { S.saved = []; return; }
+async function loadSavedGames() {
+    window.clearTimeout(savedRetryTimer);
+    if (!S.user) { S.saved = []; S.savedStatus = 'ok'; return; }
     const seq = ++savedSeq;
+    if (!S.saved.length && S.savedStatus !== 'loading') { S.savedStatus = 'loading'; if (S.screen === 'home' && !S.modal) render(); }
     try {
         const games = (await me.games()).games;
         if (seq !== savedSeq) return;   // a newer request is in flight (or has already answered)
         S.saved = games;
+        S.savedStatus = 'ok';
+        savedAttempt = 0;
     } catch {
-        if (retry) window.setTimeout(() => { if (S.screen === 'home') void loadSavedGames(false); }, 3000);
-        return;
+        if (seq !== savedSeq) return;
+        S.savedStatus = 'error';
+        const wait = SAVED_RETRY_MS[Math.min(savedAttempt++, SAVED_RETRY_MS.length - 1)];
+        savedRetryTimer = window.setTimeout(() => { if (S.user && S.screen === 'home') void loadSavedGames(); }, wait);
     }
     if (S.screen === 'home' && !S.modal) render();
 }
+
+// coming back to the app (a phone waking up, switching tabs): check the list again rather than trust an old answer
+const refreshOnReturn = () => { if (S.user && S.screen === 'home' && !document.hidden) void loadSavedGames(); };
+document.addEventListener('visibilitychange', refreshOnReturn);
+window.addEventListener('focus', refreshOnReturn);
+window.addEventListener('online', refreshOnReturn);
 
 async function openStats(push = true) {
     if (push) go({ screen: 'stats' });
     S.modal = null;
     S.screen = 'stats';
     S.stats = null;
+    S.statsError = '';
     render();
     try {
         S.stats = await me.stats();
     } catch (e) {
-        showToast((e as Error).message);
-        goHome();
-        return;
+        S.statsError = (e as Error).message || "Couldn't load your stats.";   // shown with a Retry button, not as "no stats"
     }
     render();
 }
@@ -820,7 +838,12 @@ function ago(iso: string): string {
 }
 
 function savedHtml(): string {
-    if (!S.user || !S.saved.length) return '';
+    if (!S.user) return '';
+    if (!S.saved.length) {
+        if (S.savedStatus === 'error') return `<section class="saved"><div class="load-error"><p>Couldn't load your games. The server may be waking up; trying again…</p><button class="ghost wide" data-act="reload-saved">Try now</button></div></section>`;
+        if (S.savedStatus === 'loading') return '<section class="saved"><p class="muted small center">Loading your games…</p></section>';
+        return '';
+    }
     const cards = S.saved.map((g, i) => {
         const mine = g.players.find(p => p.name === g.seat);
         const theirs = g.players.find(p => p.name !== g.seat);
@@ -845,7 +868,8 @@ function statsHtml(): string {
     const pct = (n: number) => `${Math.round(n * 100)}%`;
     const card = (label: string, value: string | number) => `<div class="stat"><strong>${value}</strong><span>${label}</span></div>`;
     let body: string;
-    if (!st) body = '<p class="muted center">Loading…</p>';
+    if (S.statsError) body = `<div class="load-error"><p>${S.statsError}</p><button class="primary" data-act="retry-stats">Try again</button></div>`;
+    else if (!st) body = '<p class="muted center">Loading…</p>';
     else if (!st.games) body = '<p class="muted center">No finished games yet. Finish a game against the computer or a friend and it will show up here.</p>';
     else body = `
         <div class="stat-grid">
@@ -1311,6 +1335,8 @@ app.addEventListener('click', (e) => {
             case 'signout': closeModal(); void pausePush().finally(() => void signOut()); break;
             case 'account': openModal('account'); break;
             case 'stats': void openStats(); break;
+            case 'retry-stats': void openStats(false); break;
+            case 'reload-saved': savedAttempt = 0; void loadSavedGames(); break;
             case 'resume-saved': { const g = S.saved[Number(actEl.dataset.i)]; if (g) void resumeSaved(g); break; }
             case 'delete-saved': { const g = S.saved[Number(actEl.dataset.i)]; if (g) void deleteSaved(g); break; }
             case 'help': openModal('help'); break;
@@ -1448,7 +1474,7 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') recallAll();
 });
 
-if (import.meta.env.DEV) Object.assign(window, { __equadium: { S, render, refreshPushStatus } });   // lets the browser tests drive state the app can't reach without a Google sign-in
+if (import.meta.env.DEV) Object.assign(window, { __equadium: { S, render, refreshPushStatus, loadSavedGames, openStats } });   // lets the browser tests drive state the app can't reach without a Google sign-in
 render();
 
 // Boot: restore any saved sign-in, then work out where to start: an invite link (?room=CODE) wins, otherwise

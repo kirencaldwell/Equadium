@@ -11,6 +11,7 @@
     "e2e:forfeit": "node e2e/forfeit.mjs",
     "e2e:calc": "node e2e/calc.mjs",
     "e2e:pinch": "node e2e/pinch.mjs",
+    "e2e:loading": "node e2e/loading.mjs",
     "e2e:endgame": "node e2e/endgame.mjs",
     "e2e:preview": "node e2e/preview.mjs",
     "e2e:rack": "node e2e/rack.mjs",
