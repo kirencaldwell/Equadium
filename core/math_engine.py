@@ -141,7 +141,9 @@ class MathEngine:
             part, has_constant = self._strip_constant_terms(part)
             found = found or has_constant
             stripped.append(part)
-        if "int(" in tokens and self.config["require_plus_c"] and not found:
+        # A C tile anywhere in the line satisfies the requirement; the maths still has to hold (a C inside a product
+        # such as "Cx" is an ordinary symbol, so it can't smuggle anything past the check).
+        if "int(" in tokens and self.config["require_plus_c"] and not found and "C" not in tokens:
             return False, "Missing constant of integration (+C or -C)"
 
         try:
