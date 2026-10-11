@@ -7,7 +7,7 @@ export function tileKind(symbol: string): 'calc' | 'fn' | 'eq' | 'var' | 'num' |
     if (symbol === 'd/dx(' || symbol === 'int(') return 'calc';
     if (symbol === '=') return 'eq';
     if (['e^x', 'exp(', 'sin(x)', 'cos(x)', 'ln(x)'].includes(symbol)) return 'fn';
-    if (['x', 'a', 'b', 'k', 'C', '(x+a)', '(x+b)', 'x**2', 'x**3', 'x**4'].includes(symbol)) return 'var';
+    if (['x', 'a', 'b', 'k', 'i', 'C', '(x+a)', '(x+b)', 'x**2', 'x**3', 'x**4'].includes(symbol)) return 'var';
     if (/^\d/.test(symbol)) return 'num';
     return 'op';
 }
@@ -50,7 +50,9 @@ export function equationFromTiles(symbols: string[]): string {
     for (const t of symbols) {
         const op = OPERATORS.has(t), closer = t === ')';
         const prevEndsValue = prev !== null && !OPERATORS.has(prev) && !OPENERS.has(prev);
-        if (op) html += `<span class="op">${t === '-' ? '\u2212' : t}</span>`;
+        const sign = t === '-' && (prev === null || OPERATORS.has(prev) || OPENERS.has(prev));   // a minus sign, not a subtraction
+        if (sign) html += '<span class="sign">\u2212</span>';
+        else if (op) html += `<span class="op">${t === '-' ? '\u2212' : t}</span>`;
         else {
             if (!closer && prevEndsValue) html += '<i class="dot">\u00b7</i>';
             html += `<span class="term">${math(t)}</span>`;

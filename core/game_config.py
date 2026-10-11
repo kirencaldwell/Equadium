@@ -27,6 +27,7 @@ CONFIG = {
         # Numbers & Basic Operators
         "a": {"count": 5, "points": 1},
         "b": {"count": 5, "points": 1},
+        "i": {"count": 3, "points": 5},     # the imaginary unit: exp(ix) = cos(x) + i sin(x)
         "k": {"count": 6, "points": 0},   # the wild constant: any single number can stand in for k
         "1": {"count": 8, "points": 1},     # so that d/dx(x) = 1, x + 1 and int(1) = x + C can be spelled
         "2": {"count": 14, "points": 1},
@@ -42,7 +43,8 @@ CONFIG = {
         # Calculus Operations (Multipliers)
         "d/dx(": {"count": 5, "points": 7, "expr_multiplier": 2}, 
         "int(": {"count": 5, "points": 10, "expr_multiplier": 3},
-        ")": {"count": 14, "points": 0},
+        "(": {"count": 6, "points": 0},     # a plain bracket, so any group of tiles can be raised, multiplied or divided as a unit
+        ")": {"count": 18, "points": 0},    # closes (, d/dx(, int( and exp(
         "C": {"count": 6, "points": 5},
     },
     "equals_tile": {

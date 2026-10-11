@@ -18,6 +18,7 @@ await pg.click('.bar [data-act=calc]'); await pg.waitForSelector('.modal.calc');
 check('2 it lists the table rows', (await pg.$$('.modal.calc .ct-row')).length >= 10);
 const box = await pg.evaluate(() => { const m = document.querySelector('.modal.calc').getBoundingClientRect(); return m.width <= innerWidth && m.right <= innerWidth; });
 check('3 it fits a phone screen', box);
+check('3b the sheet explains the i identities', /Identities with i/.test(await pg.evaluate(() => document.querySelector('.modal.calc')?.textContent ?? '')) && /Euler/.test(await pg.evaluate(() => document.querySelector('.modal.calc')?.textContent ?? '')));
 await pg.goBack(); await pg.waitForTimeout(400);
 check('4 Back closes it and stays in the game', !(await pg.$('.modal.calc')) && !!(await pg.$('.board')));
 await pg.click('.bar [data-act=calc]'); await pg.waitForSelector('.modal.calc');

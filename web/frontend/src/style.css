@@ -382,3 +382,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .load-error { display: grid; gap: 10px; justify-items: center; text-align: center; padding: 14px 16px; border-radius: 14px; border: 1px dashed var(--line); color: var(--muted); font-size: 14px; }
 .load-error p { margin: 0; }
 .load-error .primary, .load-error .ghost { flex: none; width: auto; padding: 9px 22px; }
+
+.ct-sub { font-family: var(--display); font-size: 20px; margin: 14px 0 0; }
+.ct-sub + .calc-rules { margin-top: 8px; }
+.calc-rules .eg { white-space: normal; }
+.eg .eq .term { display: inline-block; white-space: nowrap; }
+.eg .eq .op { display: inline-block; margin: 0 .3em; }
+.eg .eq .dot { font-style: normal; opacity: .5; margin: 0 .15em; }
+.eq .sign { display: inline-block; margin-right: .08em; }
