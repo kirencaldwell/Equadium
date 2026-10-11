@@ -256,7 +256,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 
 /* ───────────── Sizing ───────────── */
 @media (max-width: 480px) {
-    :root { --cell-size: 42px; --rack-tile: 37px; }
+    :root { --cell-size: 42px; --rack-tile: min(37px, calc((100vw - 66px) / 9)); }   /* 9 rack tiles per row: a 16-tile rack plus the free = fits in two rows */
     .rack { gap: 14px 5px; padding: 10px 0 12px; }
     .score .who i { display: block; margin: 0; }
     .wordmark { font-size: 33px; }
