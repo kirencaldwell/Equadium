@@ -28,6 +28,7 @@ CONFIG = {
         "a": {"count": 5, "points": 1},
         "b": {"count": 5, "points": 1},
         "k": {"count": 6, "points": 0},   # the wild constant: any single number can stand in for k
+        "1": {"count": 8, "points": 1},     # so that d/dx(x) = 1, x + 1 and int(1) = x + C can be spelled
         "2": {"count": 14, "points": 1},
         "3": {"count": 7, "points": 1},
         "4": {"count": 6, "points": 1},
