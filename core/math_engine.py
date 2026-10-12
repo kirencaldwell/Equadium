@@ -7,8 +7,9 @@ import sympy as sp
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
 
 class TrivialZeroError(ValueError):
-    """A group of tiles that works out to 0 (d/dx of a constant, x-x...). Zero times anything is 0, so it would let a
-    play pad a line with high-value tiles that do no work."""
+    """A group of tiles that works out to 0 (d/dx of a constant, x-x...) and is multiplied by something. Zero times
+    anything is 0, so it would let a play pad a line with high-value tiles that do no work. Adding or subtracting a
+    zero, or a whole side being 0 (d/dx(2) = x - x), is fine."""
 
 
 class MathEngine:
@@ -157,12 +158,7 @@ class MathEngine:
             self._consts, self._collecting = [], True
             try:
                 first = self._parse_token_list(stripped[0])
-                self._reject_zero(first, "a side of the equation")
-                diffs = []
-                for part in stripped[1:]:
-                    value = self._parse_token_list(part)
-                    self._reject_zero(value, "a side of the equation")
-                    diffs.append(value - first)
+                diffs = [self._parse_token_list(part) - first for part in stripped[1:]]
                 consts = list(self._consts)
             finally:
                 self._collecting = False
@@ -306,10 +302,16 @@ class MathEngine:
                     return i
         raise ValueError(f"'{tokens[start]}' is never closed")
 
-    @staticmethod
-    def _reject_zero(value, what):
-        if value == 0:
-            raise TrivialZeroError(f"{what} works out to 0, which can't be used to pad out an equation")
+    def _reject_multiplied_zero(self, tokens, start, end, value, what):
+        """tokens[start:end+1] is a group worth `value`; if that is 0 it may be added or subtracted, not multiplied."""
+        if value != 0:
+            return
+        before = tokens[start - 1] if start > 0 else None
+        after = tokens[end + 1] if end + 1 < len(tokens) else None
+        multiplied_before = before is not None and (before == ")" or bool(self._VALUE_TILE.match(before)))
+        multiplied_after = after is not None and (after in self._OPENERS or bool(self._VALUE_TILE.match(after)))
+        if multiplied_before or multiplied_after:
+            raise TrivialZeroError(f"{what} works out to 0, so it can be added or subtracted but not multiplied")
 
     def _parse_token_list(self, tokens):
         """
@@ -326,7 +328,7 @@ class MathEngine:
                 inner = self._parse_token_list(tokens[i + 1:j])
                 if t == "d/dx(":
                     value = sp.diff(inner, self.x)
-                    self._reject_zero(value, "A derivative")
+                    self._reject_multiplied_zero(tokens, i, j, value, "A derivative")
                 else:
                     c = sp.Symbol(f"_C{len(self._consts)}")
                     self._consts.append(c)
@@ -336,10 +338,10 @@ class MathEngine:
                 out.append(name)
                 i = j + 1
             else:
-                if t in ("(", "exp("):                         # a bracket that is 0 would zero out whatever it multiplies
+                if t == "(":                                   # a bracket that is 0 would zero out whatever it multiplies
                     j = self._closing_index(tokens, i)
                     n = len(self._consts)
-                    self._reject_zero(self._parse_token_list(tokens[i + 1:j]), "A bracket")
+                    self._reject_multiplied_zero(tokens, i, j, self._parse_token_list(tokens[i + 1:j]), "A bracket")
                     del self._consts[n:]
                 out.append(t)
                 i += 1

@@ -458,17 +458,29 @@ def test_new_tiles_and_stacked_calculus_are_valid(equation):
 
 
 @pytest.mark.parametrize("equation", [
-    "d/dx(2)=d/dx(3)",                                       # 0 = 0
     "d/dx(2)sin(x)cos(x)x**3=d/dx(3)ln(x)sin(x)",            # zero times anything, both sides
-    "d/dx(2)sin(x)cos(x)+x=x",                               # a zero factor padding a true line
+    "d/dx(2)sin(x)=d/dx(3)ln(x)",
+    "x d/dx(2)=d/dx(3)x".replace(" ", ""),
+    "(x-x)sin(x)+x=x",                                       # a bracket that is zero
+    "x(d/dx(2)+x-x)=d/dx(3)",
+])
+def test_a_zero_cannot_be_multiplied(equation):
+    ok, msg = fresh_session().game.math.validate_equation(equation)
+    assert not ok and "multiplied" in msg
+
+
+@pytest.mark.parametrize("equation", [
+    "d/dx(2)=d/dx(3)",                                       # 0 = 0 is fine on its own
+    "d/dx(2)=d/dx(3)=d/dx(a)",
     "x-x=d/dx(a)",
     "-x+x=x-x",
-    "(x-x)sin(x)+x=x",                                       # a bracket that is zero
-    "d/dx(2)=d/dx(3)=d/dx(a)",
+    "d/dx(2)+x=x",                                           # adding a zero is fine
+    "x-d/dx(2)=x",
+    "(x-x)=d/dx(2)",
 ])
-def test_zero_cannot_pad_out_an_equation(equation):
+def test_zero_can_be_added_and_subtracted(equation):
     ok, msg = fresh_session().game.math.validate_equation(equation)
-    assert not ok and "0" in msg
+    assert ok, msg
 
 
 def test_ordinary_calculus_still_valid():
