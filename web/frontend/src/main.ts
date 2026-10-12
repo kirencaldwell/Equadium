@@ -1277,6 +1277,7 @@ function modalHtml(): string {
                 <li>You get <b>one free <span class="eg">=</span></b> each turn.</li>
                 <li><span class="eg">k</span> is <b>whatever constant you need it to be</b> (but never 0), and worth 0 points: <span class="eg">${equation('2k=3')}</span> works.</li>
                 <li><span class="eg">${equation('d/dx(')}</span> and <span class="eg">${equation('int(')}</span> tiles multiply your score by <b>×2</b> and <b>×3</b>. An integral needs a <span class="eg">C</span> (anywhere in the line). Multipliers add together: a <span class="eg">${equation('d/dx(')}</span> and an <span class="eg">${equation('int(')}</span> in the same line make <b>×5</b>, and two <span class="eg">${equation('d/dx(')}</span> tiles (a second derivative) make <b>×4</b>. They can sit inside bigger expressions too: <span class="eg">${equation('d/dx(x**2)+x=3x')}</span>.</li>
+                <li>No <b>0 = 0</b>: a side, bracket or derivative that works out to 0 is not allowed (so <span class="eg">${equation('d/dx(2)=d/dx(3)')}</span> and <span class="eg">${equation('x-x=d/dx(2)')}</span> are rejected), however many tiles you multiply by it.</li>
                 <li>The game ends when the <b>last tile is drawn</b>: the other player gets one final turn to answer, then scores are final.</li>
             </ol>
             <button class="primary" data-act="close">Got it</button>`;
