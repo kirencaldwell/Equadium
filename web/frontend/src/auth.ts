@@ -4,6 +4,7 @@ import {
     initializeAuth, onAuthStateChanged,
     signInWithPopup, signInWithRedirect, signOut as fbSignOut, type Auth, type User as FbUser,
 } from 'firebase/auth';
+import { report } from './diag';
 
 const cfg = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string | undefined,
@@ -62,22 +63,25 @@ const PENDING_ROOM = 'equadium.pendingRoom';
 const isPopupProblem = (code: string) =>
     ['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(code);
 
-/** Turns Firebase's error codes into something a person (or whoever is setting this up) can act on. */
+/** Turns Firebase's error codes into something a player can act on. Setup problems (domain not authorised, sign-in
+ *  method off, bad key) go to the owner's log instead, and the player just sees that sign-in isn't available. */
 function friendlyAuthError(e: unknown): Error {
     const code = (e as { code?: string }).code ?? '';
+    const setupProblems = ['auth/unauthorized-domain', 'auth/operation-not-allowed', 'auth/invalid-api-key', 'auth/configuration-not-found'];
+    if (setupProblems.includes(code)) {
+        report('sign-in setup', `${code} on ${location.host}`);
+        return new Error("Sign-in isn't available right now. Please try again later.");
+    }
     const messages: Record<string, string> = {
-        'auth/unauthorized-domain': "This site isn't allowed to sign in yet. Add its domain in Firebase → Authentication → Settings → Authorized domains.",
-        'auth/operation-not-allowed': 'Google sign-in is not enabled. Turn it on in Firebase → Authentication → Sign-in method.',
-        'auth/invalid-api-key': 'The Firebase API key in this build is invalid. Check the VITE_FIREBASE_* settings.',
-        'auth/configuration-not-found': 'Firebase Authentication is not set up for this project yet.',
         'auth/network-request-failed': "Couldn't reach Google. Check your connection and try again.",
         'auth/internal-error': "Couldn't reach Google to sign in. Check your connection (or any ad/privacy blocker) and try again.",
     };
-    return new Error(messages[code] ?? `Sign-in failed (${code || (e as Error).message})`);
+    if (!messages[code]) report('sign-in failed', code || (e as Error).message);
+    return new Error(messages[code] ?? "Sign-in didn't work. Please try again.");
 }
 
 export async function signInWithGoogle(): Promise<void> {
-    if (!auth) throw new Error('Sign-in is not configured');
+    if (!auth) { report('sign-in setup', 'Firebase env vars missing in this build'); throw new Error("Sign-in isn't available right now. Please try again later."); }
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
     try {
