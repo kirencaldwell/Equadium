@@ -1,7 +1,10 @@
 """
 Summarises the anonymous per-game analytics records (collection "game_analytics") into score distributions.
 
-    python -m web.api.analytics_report            # reads Firestore with the same env vars as the server
+    FIREBASE_PROJECT_ID=... FIREBASE_SERVICE_ACCOUNT='<service account json>' python -m web.api.analytics_report
+    ... python -m web.api.analytics_report --csv turns.csv   # also one row per turn, for a spreadsheet
+
+Run it on your own machine with the same two variables the API host uses (see README); it only reads.
 """
 import statistics
 from collections import Counter
@@ -27,8 +30,28 @@ def report(records) -> dict:
     }
 
 
-if __name__ == "__main__":
-    import json
+def turn_rows(records):
+    """One row per turn, for a spreadsheet: game, mode, end reason, turn number, seat kind, action, score, tiles."""
+    for r in records:
+        kinds = {p["seat"]: p["kind"] for p in r["players"]}
+        for t in r["turn_log"]:
+            yield [r["game_id"], r["mode"], r["end_reason"], t["n"], kinds.get(t["seat"]), t["action"], t["score"], " ".join(t["tiles"])]
+
+
+def main(argv):
+    import csv, json
     store = get_store()
-    docs = [d.to_dict() for d in store.db.collection("game_analytics").stream()] if hasattr(store, "db") else list(store._analytics.values())
-    print(json.dumps(report(docs), indent=2))
+    if not hasattr(store, "db") or getattr(store, "degraded", False):
+        raise SystemExit("Firestore isn't configured: set FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT.")
+    records = [d.to_dict() for d in store.db.collection("game_analytics").stream()]
+    print(json.dumps(report(records), indent=2))
+    if "--csv" in argv:
+        with open(argv[argv.index("--csv") + 1], "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["game_id", "mode", "end_reason", "turn", "seat_kind", "action", "score", "tiles"])
+            w.writerows(turn_rows(records))
+
+
+if __name__ == "__main__":
+    import sys
+    main(sys.argv[1:])
