@@ -401,6 +401,21 @@ async function deleteSaved(g: SavedGame) {
     try { await api.remove(g.id); } catch (e) { showToast((e as Error).message); void loadSavedGames(); }
 }
 
+/** Close a game nobody joined (after a confirm). The server only allows this while the second seat is still empty. */
+async function closeSaved(g: SavedGame) {
+    if (!g.code || !window.confirm(`Close game ${g.code}? The code will stop working for anyone you sent it to.`)) return;
+    try {
+        await room.close(g.code, g.token ?? '');
+        if (loadSaved()?.code === g.code) saveSeat(null);
+        S.saved = S.saved.filter(x => x.id !== g.id);
+        showToast('Game closed.');
+        render();
+    } catch (e) {
+        showToast((e as Error).message);
+        void loadSavedGames();   // e.g. a friend just joined: show it as a live game instead
+    }
+}
+
 /** Registers the profile. If the server isn't actually saving games (storage misconfigured) that goes to the owner's log, not the player's screen. */
 async function checkSaving() {
     try {
@@ -943,7 +958,8 @@ function savedHtml(): string {
             <button class="saved-main" data-act="resume-saved" data-i="${i}">
                 <span class="saved-text"><strong>${title}</strong><small>${state}</small></span>${score}
             </button>
-            ${online ? '' : `<button class="saved-del" data-act="delete-saved" data-i="${i}" aria-label="Delete game">${ico('close')}</button>`}
+            ${!online ? `<button class="saved-del" data-act="delete-saved" data-i="${i}" aria-label="Delete game">${ico('close')}</button>`
+                : g.status === 'waiting' && g.seat ? `<button class="saved-del" data-act="close-saved" data-i="${i}" aria-label="Close this game">${ico('close')}</button>` : ''}
         </div>`;
     }).join('');
     return `<section class="saved"><h3>Your games</h3>${cards}</section>`;
@@ -1495,6 +1511,7 @@ app.addEventListener('click', (e) => {
             case 'retry-stats': void openStats(false); break;
             case 'reload-saved': savedAttempt = 0; void loadSavedGames(); break;
             case 'resume-saved': { const g = S.saved[Number(actEl.dataset.i)]; if (g) void resumeSaved(g); break; }
+            case 'close-saved': { const g = S.saved[Number(actEl.dataset.i)]; if (g) void closeSaved(g); break; }
             case 'delete-saved': { const g = S.saved[Number(actEl.dataset.i)]; if (g) void deleteSaved(g); break; }
             case 'help': openModal('help'); break;
             case 'calc': openModal('calc'); break;

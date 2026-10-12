@@ -73,6 +73,8 @@ export const room = {
         call<ActionResult>(`/rooms/${code}/swap`, authed(token, json({ tile_indices: indices }))),
     pass: (code: string, token: string) =>
         call<ActionResult>(`/rooms/${code}/pass`, authed(token, { method: 'POST' })),
+    close: (code: string, token: string) =>
+        call<{ closed: boolean }>(`/rooms/${encodeURIComponent(code)}`, authed(token, { method: 'DELETE' })),
     forfeit: (code: string, token: string) =>
         call<ActionResult>(`/rooms/${code}/forfeit`, authed(token, { method: 'POST' })),
     // A guest who lost their seat token asks the player still in the game to hand the seat back.
