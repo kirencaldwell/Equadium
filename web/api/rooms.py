@@ -51,6 +51,7 @@ class Room:
     # Pending "let me back into my seat" requests (id -> request). In memory only: they are short-lived.
     reclaims: Dict[str, dict] = field(default_factory=dict)
     version: int = 0
+    closed: bool = False
     last_active: float = field(default_factory=time.time)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -212,6 +213,8 @@ def join_room(code: str, request: Request, body: Optional[NameModel] = None,
               user: Optional[AuthUser] = Depends(optional_user)):
     room = _get_room(code)
     with room.lock:
+        if room.closed:
+            raise HTTPException(status_code=404, detail="That game was closed by the player who made it")
         # A returning player: a guest presenting the seat token they were issued, or a signed-in
         # player re-opening their own game on another device. Neither is a new player.
         existing = room.seat_for(x_player_token, user)
@@ -240,6 +243,26 @@ def join_room(code: str, request: Request, body: Optional[NameModel] = None,
 
 class ReclaimModel(BaseModel):
     seat: str
+
+
+@router.delete("/{code}")
+def close_room(code: str, x_player_token: Optional[str] = Header(None),
+               user: Optional[AuthUser] = Depends(optional_user)):
+    """Close a game nobody joined. Only the player who made it can, and only while it is still waiting."""
+    room = _get_room(code)
+    seat = _require_seat(room, x_player_token, user)
+    with room.lock:
+        if room.full:
+            raise HTTPException(status_code=409, detail="Someone has already joined this game")
+        room.closed = True
+        # Keep the record (marked abandoned) so the code is never reused; it drops out of Your Games and stops loading.
+        persistence.save_game(room.id, "room", room.session, room.seat_users, code=room.code, status="abandoned",
+                              labels=room.labels, meta={"tokens": room.tokens, "labels": room.labels, "version": room.version})
+        room.touch()
+    with _rooms_lock:
+        _rooms.pop(room.code, None)
+    logger.info("room %s closed by %s", room.code, seat)
+    return {"closed": True}
 
 
 @router.get("/{code}/seats")

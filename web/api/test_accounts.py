@@ -939,3 +939,37 @@ def test_client_log_writes_to_the_server_log_and_is_capped(caplog):
             client.post("/client-log", json={"kind": "spam"})
     assert len(caplog.records) == clientlog.MAX_PER_MINUTE                                       # then it stops logging
     assert client.post("/client-log", json={"kind": "spam"}).status_code == 200                  # ...but never errors the app
+
+
+# ── closing a game nobody joined ────────────────────────────────────────────
+def waiting_codes(headers):
+    return [g["code"] for g in client.get("/me/games", headers=headers).json()["games"] if g["kind"] == "room"]
+
+
+def test_host_can_close_a_waiting_room():
+    host = client.post("/rooms", json={}, headers=H()).json()
+    assert host["code"] in waiting_codes(H())
+    assert client.delete(f"/rooms/{host['code']}", headers=H()).json() == {"closed": True}
+    assert waiting_codes(H()) == []
+    assert client.get(f"/rooms/{host['code']}", headers=H()).status_code == 404
+    assert client.post(f"/rooms/{host['code']}/join", json={}, headers=H(BOB, "Bob")).status_code == 404
+    restart()   # still closed after a restart
+    assert client.get(f"/rooms/{host['code']}", headers=H()).status_code == 404
+
+
+def test_only_the_host_can_close_and_not_once_someone_joined():
+    host = client.post("/rooms", json={}, headers=H()).json()
+    assert client.delete(f"/rooms/{host['code']}", headers=H(BOB, "Bob")).status_code == 403
+    assert client.delete(f"/rooms/{host['code']}").status_code == 403
+    assert host["code"] in waiting_codes(H())
+    client.post(f"/rooms/{host['code']}/join", json={}, headers=H(BOB, "Bob"))
+    assert client.delete(f"/rooms/{host['code']}", headers=H()).status_code == 409
+    assert client.delete(f"/rooms/{host['code']}", headers=H(BOB, "Bob")).status_code == 409
+    assert client.get(f"/rooms/{host['code']}", headers=H()).status_code == 200
+
+
+def test_guest_host_can_close_with_their_seat_token():
+    host = client.post("/rooms", json={"name": "Gus"}).json()
+    assert client.delete(f"/rooms/{host['code']}", headers={"X-Player-Token": "wrong"}).status_code == 403
+    assert client.delete(f"/rooms/{host['code']}", headers={"X-Player-Token": host["token"]}).status_code == 200
+    assert client.get(f"/rooms/{host['code']}", headers={"X-Player-Token": host["token"]}).status_code == 404
