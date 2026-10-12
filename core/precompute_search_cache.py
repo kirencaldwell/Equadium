@@ -68,7 +68,7 @@ def main() -> int:
                 pairs[_SEP.join(x for x in (pk, a if pk != "e>" else None, b if pk != "e<" else None) if x is not None)] = value
             else:
                 ck, tokens = payload
-                calculus[_SEP.join((ck, *tokens))] = list(value) if value is not None else None
+                calculus[_SEP.join((ck, *tokens))] = [[v.real, v.imag] for v in value] if value is not None else None
             if i % 250 == 0 or i == len(tasks):
                 print(f"  {i}/{len(tasks)} ({time.time() - start:.0f}s)", flush=True)
     tmp = CACHE_FILE + ".tmp"
