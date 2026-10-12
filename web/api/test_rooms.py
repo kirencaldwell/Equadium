@@ -46,6 +46,15 @@ def test_third_player_is_rejected_and_unknown_code_404s():
     assert client.post("/rooms/NOPE0/join").status_code == 404
 
 
+def test_returning_guest_with_their_token_rejoins_their_seat():
+    host, guest = new_game()
+    again = client.post(f"/rooms/{host['code']}/join", json={"name": "Bo"}, headers=hdr(guest["token"]))
+    assert again.status_code == 200 and again.json()["seat"] == guest["seat"]
+    assert again.json()["token"] == guest["token"]
+    stranger = client.post(f"/rooms/{host['code']}/join", headers=hdr("not-a-token"))
+    assert stranger.status_code == 409
+
+
 def test_state_hides_the_opponents_rack_but_shows_your_own():
     host, guest = new_game()
     for me, other in ((host, guest), (guest, host)):

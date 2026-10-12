@@ -61,7 +61,8 @@ const authed = (token: string, init: RequestInit = {}): RequestInit => ({
 
 export const room = {
     create: (name: string) => call<RoomJoin>('/rooms', json({ name })),
-    join: (code: string, name: string) => call<RoomJoin>(`/rooms/${encodeURIComponent(code)}/join`, json({ name })),
+    join: (code: string, name: string, token = '') =>
+        call<RoomJoin>(`/rooms/${encodeURIComponent(code)}/join`, authed(token, json({ name }))),
     state: (code: string, token: string, since?: number) =>
         call<RoomPoll>(`/rooms/${code}${since === undefined ? '' : `?since=${since}`}`, authed(token)),
     validate: (code: string, token: string, placed: Placed[], direction: string) =>

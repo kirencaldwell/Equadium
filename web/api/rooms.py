@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from core.game_config import CONFIG
@@ -193,13 +193,22 @@ def create_room(body: Optional[NameModel] = None, user: Optional[AuthUser] = Dep
 
 
 @router.post("/{code}/join")
-def join_room(code: str, body: Optional[NameModel] = None, user: Optional[AuthUser] = Depends(optional_user)):
+def join_room(code: str, request: Request, body: Optional[NameModel] = None,
+              x_player_token: Optional[str] = Header(None),
+              user: Optional[AuthUser] = Depends(optional_user)):
     room = _get_room(code)
     with room.lock:
-        existing = room.seat_for(None, user)
-        if existing:   # a signed-in player re-opening their own game on another device
+        # A returning player: a guest presenting the seat token they were issued, or a signed-in
+        # player re-opening their own game on another device. Neither is a new player.
+        existing = room.seat_for(x_player_token, user)
+        if existing:
             return {"code": room.code, "seat": existing, "token": room.tokens[existing]}
         if room.full:
+            # Server logs only (never the UI): guests have no account id, so this is what we can tell.
+            logger.warning(
+                "Join refused, room %s full: seats=%s presented_token=%s signed_in=%s client=%s ua=%r",
+                room.code, dict(room.labels), bool(x_player_token), user.id if user else None,
+                request.client.host if request.client else None, request.headers.get("user-agent", "")[:120])
             raise HTTPException(status_code=409, detail="That game already has two players")
         seat = next(s for s in SEATS if s not in room.tokens)
         host = next(iter(room.labels.values()))

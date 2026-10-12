@@ -605,7 +605,7 @@ async function joinOnline(code: string) {
     const name = readName();
     code = code.trim().toUpperCase();
     if (!code) { showToast('Enter a game code'); return; }
-    try { await enterRoom(await room.join(code, name)); } catch (e) { showToast((e as Error).message); }
+    try { await enterRoom(await room.join(code, name, loadSaved()?.code === code ? loadSaved()!.token : '')); } catch (e) { showToast((e as Error).message); }
 }
 
 function readName(): string {
