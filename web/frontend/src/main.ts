@@ -1324,6 +1324,33 @@ app.addEventListener('wheel', (e) => {
     zoomAround(S.zoom * Math.exp(-e.deltaY * 0.01), e.clientX - r.left, e.clientY - r.top);
 }, { passive: false });
 
+// Desktop: hold the middle mouse button (wheel click) and drag to pan the board. Pressing it would otherwise
+// start the browser's autoscroll, so that default is cancelled.
+let midPan: { id: number; x: number; y: number; sc: HTMLElement } | null = null;
+app.addEventListener('pointerdown', (e) => {
+    const sc = onBoard(e);
+    if (e.button !== 1 || !sc) return;
+    e.preventDefault();
+    midPan = { id: e.pointerId, x: e.clientX, y: e.clientY, sc };
+    sc.classList.add('panning');
+});
+document.addEventListener('pointermove', (e) => {
+    if (!midPan || e.pointerId !== midPan.id) return;
+    midPan.sc.scrollLeft -= e.clientX - midPan.x;
+    midPan.sc.scrollTop -= e.clientY - midPan.y;
+    midPan.x = e.clientX;
+    midPan.y = e.clientY;
+});
+const endMidPan = (e: PointerEvent) => {
+    if (!midPan || e.pointerId !== midPan.id) return;
+    midPan.sc.classList.remove('panning');
+    midPan = null;
+};
+document.addEventListener('pointerup', endMidPan);
+document.addEventListener('pointercancel', endMidPan);
+app.addEventListener('mousedown', (e) => { if (e.button === 1 && onBoard(e)) e.preventDefault(); });
+app.addEventListener('auxclick', (e) => { if (e.button === 1 && onBoard(e)) e.preventDefault(); });
+
 // ─────────────────────────────────────────────
 // Events (delegated)
 // ─────────────────────────────────────────────
