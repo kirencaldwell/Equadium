@@ -224,11 +224,9 @@ class AIAgent:
         score = 0
         for eq_str, eq_tiles in equations_data:
             eq_points = sum(tile.points for tile in eq_tiles)
-            multiplier = 1
-            for _, _, placed_tile in move.tiles_to_play:
-                if placed_tile in eq_tiles:
-                    multiplier *= placed_tile.expr_multiplier
-            score += eq_points * multiplier
+            boosts = [placed_tile.expr_multiplier for _, _, placed_tile in move.tiles_to_play
+                      if placed_tile in eq_tiles and placed_tile.expr_multiplier > 1]
+            score += eq_points * (sum(boosts) or 1)
             
         game.board.remove_tiles([(r, c) for r, c, _ in move.tiles_to_play])
         return score

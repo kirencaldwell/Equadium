@@ -467,12 +467,12 @@ class SearchAgent:
         return scan(-1), scan(1)
 
     def _estimate_score(self, tokens, anchor_idx) -> int:
-        pts, mult = 0, 1
+        pts, boosts = 0, 0
         for i, s in enumerate(tokens):
             pts += self.points.get(s, 0)
-            if i != anchor_idx:
-                mult *= self.mult.get(s, 1)
-        return pts * mult
+            if i != anchor_idx and self.mult.get(s, 1) > 1:
+                boosts += self.mult[s]
+        return pts * (boosts or 1)
 
     def find_best_move(self, game) -> Optional[Move]:
         self._deadline = time.monotonic() + self.time_budget
