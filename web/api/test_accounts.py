@@ -921,3 +921,21 @@ def test_a_store_that_failed_to_start_does_not_pass_for_an_empty_account(monkeyp
     assert safe.get("/me/games", headers=H()).status_code == 200
     assert safe.get("/me/stats", headers=H()).status_code == 200
     set_store(None)
+
+
+# ── diagnostics go to the owner's log, not the player's screen ───────────────
+def test_client_log_writes_to_the_server_log_and_is_capped(caplog):
+    import logging
+    from web.api import clientlog
+    clientlog._recent.clear()
+    with caplog.at_level(logging.WARNING, logger="equadium_client"):
+        assert client.post("/client-log", json={"kind": "sign-in setup", "detail": "auth/unauthorized-domain on equadium.app" + "x" * 2000}).json() == {"ok": True}
+    msg = caplog.records[0].getMessage()
+    assert "sign-in setup" in msg and "auth/unauthorized-domain" in msg and len(msg) < 900      # size capped
+    caplog.clear()
+    clientlog._recent.clear()
+    with caplog.at_level(logging.WARNING, logger="equadium_client"):
+        for _ in range(40):
+            client.post("/client-log", json={"kind": "spam"})
+    assert len(caplog.records) == clientlog.MAX_PER_MINUTE                                       # then it stops logging
+    assert client.post("/client-log", json={"kind": "spam"}).status_code == 200                  # ...but never errors the app

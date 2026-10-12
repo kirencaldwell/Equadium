@@ -9,6 +9,7 @@ export default defineConfig({
       '/me': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/push': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/modes': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/client-log': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },
 });

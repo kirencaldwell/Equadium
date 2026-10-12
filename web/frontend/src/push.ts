@@ -6,6 +6,7 @@
  * moves in one of their online games (see public/sw.js for what is shown).
  */
 import { push as pushApi } from './api';
+import { report } from './diag';
 
 export type PushStatus =
     | 'unsupported'    // this browser has no web push
@@ -65,7 +66,7 @@ export async function pushStatus(userId: string): Promise<PushStatus> {
 export async function enablePush(userId: string): Promise<void> {
     // With the config already cached nothing is awaited before the prompt, so it still counts as the tap's own.
     const c = cfg ?? await serverConfig();
-    if (!c.enabled || !c.public_key) throw new Error('Notifications are not set up on the server yet.');
+    if (!c.enabled || !c.public_key) { report('push setup', 'server has no VAPID keys configured'); throw new Error('Notifications are not available right now.'); }
     setFlag(OPTOUT_KEY, false);
     if (Notification.permission === 'default') setFlag(ASKED_KEY, true);
     const permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();

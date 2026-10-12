@@ -1,4 +1,5 @@
 import { accessToken, refreshToken } from './auth';
+import { report } from './diag';
 import type { GameState, Mode, Placed, Preview, SavedGame, Stats } from './types';
 
 // Empty in dev (Vite proxies to the local API); set VITE_API_URL to the hosted API in production.
@@ -14,13 +15,17 @@ async function call<T>(url: string, init: RequestInit = {}, retried = false): Pr
         res = await fetch(BASE + url, { ...init, headers });
     } catch {
         // fetch only throws when no response arrived at all: server asleep or down, offline, or blocked.
-        throw new Error("Couldn't reach the game server. If it has been idle it may be waking up: wait a minute and try again.");
+        throw new Error("Couldn't reach the game server. Please try again in a moment.");
     }
     if (res.status === 401 && token && !retried && await refreshToken()) return call<T>(url, init, true);
     if (!res.ok) {
         let detail = res.statusText;
         try { detail = (await res.json()).detail ?? detail; } catch { /* not json */ }
-        throw new Error(detail);
+        if (res.status >= 500) {          // our fault, not the player's: say so plainly and keep the details for the owner
+            report(`server ${res.status}`, `${init.method ?? 'GET'} ${url}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
+            throw new Error('Something went wrong on our side. Please try again in a moment.');
+        }
+        throw new Error(typeof detail === 'string' ? detail : 'That request was not accepted.');
     }
     return res.json() as Promise<T>;
 }

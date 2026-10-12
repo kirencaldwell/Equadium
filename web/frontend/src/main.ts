@@ -14,6 +14,7 @@ import { inject } from '@vercel/analytics';
 import { api, me, push as pushApi, room } from './api';
 import { ico } from './icons';
 import { authAvailable, initAuth, signInWithGoogle, signOut, takePendingRoom, type User } from './auth';
+import { report } from './diag';
 import { equation, equationFromTiles, math, tileHtml } from './tiles';
 import { autoEnablePush, disablePush, enablePush, IOS_HINT, onNotificationOpen, pausePush, pushStatus, syncPush, type PushStatus } from './push';
 import { currentState, parseHash, pushModal, pushRoute, replaceRoute, sameRoute, type Route } from './nav';
@@ -374,7 +375,8 @@ async function openStats(push = true) {
     try {
         S.stats = await me.stats();
     } catch (e) {
-        S.statsError = (e as Error).message || "Couldn't load your stats.";   // shown with a Retry button, not as "no stats"
+        report('stats load failed', e as Error);
+        S.statsError = "Couldn't load your stats right now. Try again in a moment.";   // shown with a Retry button, not as "no stats"
     }
     render();
 }
@@ -394,11 +396,11 @@ async function deleteSaved(g: SavedGame) {
     try { await api.remove(g.id); } catch (e) { showToast((e as Error).message); void loadSavedGames(); }
 }
 
-/** Registers the profile and warns if the server is up but not actually saving games (e.g. storage misconfigured). */
+/** Registers the profile. If the server isn't actually saving games (storage misconfigured) that goes to the owner's log, not the player's screen. */
 async function checkSaving() {
     try {
         const p = await me.profile();
-        if (p.saving === 'memory') showToast("Heads up: the server isn't saving games right now, so progress won't carry over.");
+        if (p.saving === 'memory') report('storage', 'server is not saving games (memory store)');
     } catch { /* offline or not signed in on the server: nothing to report */ }
 }
 
@@ -433,7 +435,7 @@ async function testPush() {
         const r = await pushApi.test();
         if (!r.devices) showToast("The server has no device registered for you yet. Turn notifications off and on again.");
         else if (r.results.every(x => x.ok)) showToast(`Sent to ${r.devices} device${r.devices > 1 ? 's' : ''}. If nothing appears, check your phone's notification settings for this browser.`);
-        else showToast(r.results.find(x => !x.ok)?.error ?? "The push service didn't accept it.");
+        else { report('push test failed', r.results.find(x => !x.ok)?.error ?? 'push service rejected it'); showToast("Couldn't deliver the test notification. Please try again later."); }
     } catch (e) {
         showToast((e as Error).message || "Couldn't send a test notification.");
     }
@@ -629,7 +631,7 @@ async function submitAction(run: () => Promise<{ status: string; error: string |
             S.shake = true;
             render();
             S.shake = false;
-            showToast(res.error ?? 'That move was not accepted');
+            showToast(friendlyMoveError(res.error));
             return;
         }
         S.busy = null;
@@ -644,6 +646,13 @@ async function submitAction(run: () => Promise<{ status: string; error: string |
         render();
         showToast((e as Error).message);
     }
+}
+
+/** Rejected plays say what is wrong with the move; the engine's own wording (parser messages) stays out of the player's way. */
+function friendlyMoveError(err: string | null): string {
+    if (!err) return 'That move was not accepted';
+    if (/is not a valid equation/.test(err)) return "That play doesn't make a true equation. Every row and column your tiles touch must balance.";
+    return err;
 }
 
 function describeMove(player: string, action: string, tiles: number, score: number): string {
