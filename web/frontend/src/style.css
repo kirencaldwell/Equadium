@@ -390,3 +390,5 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .eg .eq .op { display: inline-block; margin: 0 .3em; }
 .eg .eq .dot { font-style: normal; opacity: .5; margin: 0 .15em; }
 .eq .sign { display: inline-block; margin-right: .08em; }
+
+.board-scroll.panning, .board-scroll.panning * { cursor: grabbing; user-select: none; }
