@@ -178,13 +178,16 @@ class EquadiumGame:
 
     @staticmethod
     def score_play(equations_data, move_tiles) -> int:
-        """Points for a play: each equation's tile points, times the multipliers of newly placed tiles in it."""
+        """
+        Points for a play: each equation's tile points, times the multipliers of newly placed tiles in it. The
+        multipliers add up rather than compound: x2 and x3 together are x4 (1 + 1 + 2), not x6.
+        """
         total = 0
         for _, eq_tiles in equations_data:
             multiplier = 1
             for _, _, placed_tile in move_tiles:
                 if placed_tile in eq_tiles:
-                    multiplier *= placed_tile.expr_multiplier
+                    multiplier += placed_tile.expr_multiplier - 1
             total += sum(t.points for t in eq_tiles) * multiplier
         return total
 

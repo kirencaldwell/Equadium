@@ -458,9 +458,19 @@ def test_new_tiles_and_stacked_calculus_are_valid(equation):
     assert ok, msg
 
 
-def test_second_derivative_scores_times_four():
-    game = fresh_session().game
-    assert game.config["tiles"]["d/dx("]["expr_multiplier"] ** 2 == 4
+def test_multipliers_add_rather_than_compound():
+    from core.game_manager import EquadiumGame
+    from core.game_entities import make_tile
+    tiles = {s: make_tile(s, CONFIG) for s in ("d/dx(", "int(", "x")}
+    def score(*placed):
+        line = list(placed) + [tiles["x"]]
+        return EquadiumGame.score_play([("eq", line)], [(0, i, t) for i, t in enumerate(placed)])
+    base = sum(t.points for t in (tiles["x"],))
+    pts = lambda *ts: sum(t.points for t in ts) + base
+    assert score(tiles["d/dx("]) == pts(tiles["d/dx("]) * 2
+    assert score(tiles["d/dx("], tiles["d/dx("]) == pts(tiles["d/dx("], tiles["d/dx("]) * 3      # x2 + x2 -> x3, not x4
+    assert score(tiles["int("], tiles["int("]) == pts(tiles["int("], tiles["int("]) * 5          # not x9
+    assert score(tiles["int("], tiles["d/dx("]) == pts(tiles["int("], tiles["d/dx("]) * 4
 
 
 # ── persistence ─────────────────────────────────────────────────────────────

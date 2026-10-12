@@ -227,7 +227,7 @@ class AIAgent:
             multiplier = 1
             for _, _, placed_tile in move.tiles_to_play:
                 if placed_tile in eq_tiles:
-                    multiplier *= placed_tile.expr_multiplier
+                    multiplier += placed_tile.expr_multiplier - 1
             score += eq_points * multiplier
             
         game.board.remove_tiles([(r, c) for r, c, _ in move.tiles_to_play])

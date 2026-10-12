@@ -471,7 +471,7 @@ class SearchAgent:
         for i, s in enumerate(tokens):
             pts += self.points.get(s, 0)
             if i != anchor_idx:
-                mult *= self.mult.get(s, 1)
+                mult += self.mult.get(s, 1) - 1      # multipliers add up (see GameManager.score_play)
         return pts * mult
 
     def find_best_move(self, game) -> Optional[Move]:
