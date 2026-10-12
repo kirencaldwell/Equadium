@@ -45,7 +45,7 @@ CONFIG = {
         "int(": {"count": 5, "points": 10, "expr_multiplier": 3},
         "(": {"count": 6, "points": 0},     # a plain bracket, so any group of tiles can be raised, multiplied or divided as a unit
         ")": {"count": 18, "points": 0},    # closes (, d/dx(, int( and exp(
-        "C": {"count": 6, "points": 5},
+        "C": {"count": 6, "points": 2},
     },
     "equals_tile": {
         "count": 40,
