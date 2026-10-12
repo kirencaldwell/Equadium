@@ -605,7 +605,7 @@ async function joinOnline(code: string) {
     const name = readName();
     code = code.trim().toUpperCase();
     if (!code) { showToast('Enter a game code'); return; }
-    try { await enterRoom(await room.join(code, name)); } catch (e) { showToast((e as Error).message); }
+    try { await enterRoom(await room.join(code, name, loadSaved()?.code === code ? loadSaved()!.token : '')); } catch (e) { showToast((e as Error).message); }
 }
 
 function readName(): string {
@@ -914,6 +914,7 @@ function onlineHtml(): string {
             <input id="code" maxlength="5" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="CODE" value="${incoming}">
             <button class="primary" data-act="online-join">Join</button>
         </div>
+        ${S.user ? '' : '<p class="guest-note"><span aria-hidden="true">\u{1F512}</span> Guests are tied to this device. Sign in to switch devices.</p>'}
         <button class="link" data-act="home">Back</button>
     </main>`;
 }
@@ -932,7 +933,7 @@ function lobbyHtml(g: GameState): string {
             <div class="code">${code}</div>
             <button class="primary" data-act="copy-link">Copy invite link</button>
             <p class="waiting">Waiting for ${display(otherSeat())} to join<span class="dots"></span></p>
-            <p class="muted small">${g.labels?.[S.online!.seat] ? `You're playing as ${g.labels[S.online!.seat]}. ` : ''}${S.user ? 'Your game is saved to your account, so you can pick it up on any device.' : 'Your game is saved on this device, so you can leave and come back.'}</p>
+            <p class="muted small">${g.labels?.[S.online!.seat] ? `You're playing as ${g.labels[S.online!.seat]}. ` : ''}${S.user ? 'Your game is saved to your account, so you can pick it up on any device.' : 'Guest games stay on this device. Sign in to switch devices.'}</p>
         </main>
     </div>`;
 }
