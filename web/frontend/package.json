@@ -18,6 +18,7 @@
     "e2e:push": "node e2e/push.mjs",
     "e2e:push-default": "node e2e/push-default.mjs",
     "e2e:waiting": "node e2e/waiting.mjs",
+    "e2e:reclaim": "node e2e/reclaim.mjs",
     "e2e:autoupdate": "node e2e/autoupdate.mjs"
   },
   "devDependencies": {

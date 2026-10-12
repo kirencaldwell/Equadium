@@ -44,6 +44,8 @@ export interface GameState {
     /** online games only */
     labels?: Record<string, string>;
     joined?: boolean;
+    /** a locked-out player asking whoever holds a seat to let them back in */
+    reclaim_requests?: { id: string; seat: string; label: string }[];
 }
 
 export interface Placed {

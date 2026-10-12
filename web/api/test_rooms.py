@@ -125,3 +125,47 @@ def test_invalid_play_does_not_change_version():
 def test_solo_games_endpoint_cannot_see_rooms():
     host, _ = new_game()
     assert client.get(f"/games/{host['code']}").status_code == 404
+
+
+def test_locked_out_guest_gets_their_seat_back_when_the_host_approves():
+    host, guest = new_game()
+    code = host["code"]
+    seats = client.get(f"/rooms/{code}/seats").json()
+    assert seats["full"] and {s["label"] for s in seats["seats"]} == {"Ada", "Bo"}
+
+    req = client.post(f"/rooms/{code}/reclaim", json={"seat": guest["seat"]}).json()
+    pending = state(code, host)["state"]["reclaim_requests"]
+    assert [(r["seat"], r["label"]) for r in pending] == [(guest["seat"], "Bo")]
+    assert state(code, guest)["state"]["reclaim_requests"] == []   # the requester's own seat is not shown to them
+    wait = {"X-Reclaim-Secret": req["secret"]}
+    assert client.get(f"/rooms/{code}/reclaim/{req['request_id']}", headers=wait).json() == {"status": "pending"}
+
+    # the guest cannot approve their own request
+    assert client.post(f"/rooms/{code}/reclaim/{req['request_id']}/approve", headers=hdr(guest["token"])).status_code == 403
+    assert client.post(f"/rooms/{code}/reclaim/{req['request_id']}/approve", headers=hdr(host["token"])).status_code == 200
+
+    got = client.get(f"/rooms/{code}/reclaim/{req['request_id']}", headers=wait).json()
+    assert got["status"] == "approved" and got["seat"] == guest["seat"] and got["token"] != guest["token"]
+    assert client.get(f"/rooms/{code}/reclaim/{req['request_id']}", headers=wait).status_code == 404   # handed over once
+    assert client.get(f"/rooms/{code}", headers=hdr(got["token"])).status_code == 200
+    assert client.get(f"/rooms/{code}", headers=hdr(guest["token"])).status_code == 403   # the old token is retired
+
+
+def test_reclaim_can_be_denied_and_needs_the_secret():
+    host, guest = new_game()
+    code = host["code"]
+    req = client.post(f"/rooms/{code}/reclaim", json={"seat": guest["seat"]}).json()
+    url = f"/rooms/{code}/reclaim/{req['request_id']}"
+    assert client.get(url, headers={"X-Reclaim-Secret": "wrong"}).status_code == 404
+    assert client.post(f"{url}/deny", headers=hdr(host["token"])).status_code == 200
+    assert client.get(url, headers={"X-Reclaim-Secret": req["secret"]}).json() == {"status": "denied"}
+    assert client.get(f"/rooms/{code}", headers=hdr(guest["token"])).status_code == 200   # nothing changed
+
+
+def test_reclaim_is_refused_for_players_who_already_have_a_seat():
+    host, guest = new_game()
+    code = host["code"]
+    assert client.post(f"/rooms/{code}/reclaim", json={"seat": guest["seat"]}, headers=hdr(host["token"])).status_code == 409
+    waiting = client.post("/rooms", json={"name": "Solo"}).json()
+    assert client.post(f"/rooms/{waiting['code']}/reclaim", json={"seat": "Player1"}).status_code == 409   # open seat: just join
+    assert client.post(f"/rooms/{code}/reclaim", json={"seat": "Nope"}).status_code == 400

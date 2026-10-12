@@ -36,6 +36,8 @@ ROOM_TTL_SECONDS = 24 * 60 * 60
 MAX_ROOMS = 2000
 MAX_NAME = 16
 SEATS = ("Player1", "Player2")
+RECLAIM_TTL_SECONDS = 10 * 60
+MAX_RECLAIMS = 6
 
 
 @dataclass
@@ -46,6 +48,8 @@ class Room:
     tokens: Dict[str, str] = field(default_factory=dict)   # seat -> secret token
     labels: Dict[str, str] = field(default_factory=dict)   # seat -> display name
     seat_users: Dict[str, str] = field(default_factory=dict)   # seat -> signed-in user id
+    # Pending "let me back into my seat" requests (id -> request). In memory only: they are short-lived.
+    reclaims: Dict[str, dict] = field(default_factory=dict)
     version: int = 0
     last_active: float = field(default_factory=time.time)
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -65,6 +69,13 @@ class Room:
                 if uid == user.id:
                     return seat
         return None
+
+    def pending_reclaims(self) -> list:
+        """Open reclaim requests, dropping stale ones (and answered ones nobody collected)."""
+        cutoff = time.time() - RECLAIM_TTL_SECONDS
+        for rid in [i for i, r in self.reclaims.items() if r["created"] < cutoff]:
+            del self.reclaims[rid]
+        return [dict(r, id=rid) for rid, r in self.reclaims.items() if r["status"] == "pending"]
 
     def touch(self, bump: bool = True):
         self.last_active = time.time()
@@ -144,6 +155,9 @@ def _snapshot(room: Room, seat: Optional[str]) -> dict:
     state["board"] = state["board"].model_dump()
     state["labels"] = dict(room.labels)
     state["joined"] = room.full
+    # The other player asking to be let back into their seat (shown to whoever still holds a seat).
+    state["reclaim_requests"] = [{"id": r["id"], "seat": r["seat"], "label": room.labels.get(r["seat"], r["seat"])}
+                                 for r in room.pending_reclaims() if r["seat"] != seat]
     return state
 
 
@@ -222,6 +236,91 @@ def join_room(code: str, request: Request, body: Optional[NameModel] = None,
         room.touch()
         _save_room(room)
     return {"code": room.code, "seat": seat, "token": room.tokens[seat]}
+
+
+class ReclaimModel(BaseModel):
+    seat: str
+
+
+@router.get("/{code}/seats")
+def room_seats(code: str):
+    """Who is sitting where, for a player locked out of a full room to say which seat is theirs."""
+    room = _get_room(code)
+    return {"full": room.full, "seats": [{"seat": s, "label": room.labels.get(s, s)} for s in SEATS if s in room.tokens]}
+
+
+@router.post("/{code}/reclaim")
+def request_reclaim(code: str, body: ReclaimModel, x_player_token: Optional[str] = Header(None),
+                    user: Optional[AuthUser] = Depends(optional_user)):
+    """A guest who lost their seat token asks the player still in the game to hand the seat back."""
+    room = _get_room(code)
+    with room.lock:
+        if room.seat_for(x_player_token, user):
+            raise HTTPException(status_code=409, detail="You already have a seat in this game")
+        if not room.full:
+            raise HTTPException(status_code=409, detail="This game still has an open seat, just join it")
+        if body.seat not in SEATS:
+            raise HTTPException(status_code=400, detail="Unknown seat")
+        if body.seat in room.seat_users:
+            raise HTTPException(status_code=409, detail="That seat belongs to a signed-in player. Sign in to get back to it.")
+        room.pending_reclaims()
+        for rid in [i for i, r in room.reclaims.items() if r["seat"] == body.seat]:
+            del room.reclaims[rid]   # one request per seat: asking again replaces the old one
+        if len(room.reclaims) >= MAX_RECLAIMS:
+            raise HTTPException(status_code=429, detail="Too many requests, try again in a few minutes")
+        rid, secret = secrets.token_urlsafe(8), secrets.token_urlsafe(16)
+        room.reclaims[rid] = {"seat": body.seat, "secret": secret, "status": "pending", "token": None, "created": time.time()}
+        room.touch()   # bumps the version so the other player's next poll sees the request
+    return {"request_id": rid, "secret": secret}
+
+
+@router.get("/{code}/reclaim/{request_id}")
+def reclaim_status(code: str, request_id: str, x_reclaim_secret: Optional[str] = Header(None)):
+    """The requester polls this; once approved the new seat token is handed over exactly once."""
+    room = _get_room(code)
+    with room.lock:
+        room.pending_reclaims()
+        req = room.reclaims.get(request_id)
+        if req is None or not x_reclaim_secret or not secrets.compare_digest(req["secret"], x_reclaim_secret):
+            raise HTTPException(status_code=404, detail="That request has expired")
+        if req["status"] == "pending":
+            return {"status": "pending"}
+        del room.reclaims[request_id]
+        if req["status"] == "denied":
+            return {"status": "denied"}
+        return {"status": "approved", "seat": req["seat"], "token": req["token"]}
+
+
+def _answer_reclaim(code: str, request_id: str, token: Optional[str], user: Optional[AuthUser], approve: bool):
+    room = _get_room(code)
+    seat = _require_seat(room, token, user)
+    with room.lock:
+        room.pending_reclaims()
+        req = room.reclaims.get(request_id)
+        if req is None or req["status"] != "pending":
+            raise HTTPException(status_code=404, detail="That request has expired")
+        if req["seat"] == seat:
+            raise HTTPException(status_code=403, detail="You can't answer a request for your own seat")
+        if approve:
+            req["token"] = room.tokens[req["seat"]] = secrets.token_urlsafe(24)   # the old token stops working
+            req["status"] = "approved"
+        else:
+            req["status"] = "denied"
+        room.touch()
+        _save_room(room)
+    return {"approved": approve}
+
+
+@router.post("/{code}/reclaim/{request_id}/approve")
+def approve_reclaim(code: str, request_id: str, x_player_token: Optional[str] = Header(None),
+                    user: Optional[AuthUser] = Depends(optional_user)):
+    return _answer_reclaim(code, request_id, x_player_token, user, True)
+
+
+@router.post("/{code}/reclaim/{request_id}/deny")
+def deny_reclaim(code: str, request_id: str, x_player_token: Optional[str] = Header(None),
+                 user: Optional[AuthUser] = Depends(optional_user)):
+    return _answer_reclaim(code, request_id, x_player_token, user, False)
 
 
 @router.get("/{code}")

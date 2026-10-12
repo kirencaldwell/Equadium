@@ -395,3 +395,5 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 
 .guest-note { margin: .75rem 0 0; padding: .4rem .7rem; border-radius: 999px; background: color-mix(in srgb, currentColor 8%, transparent);
     font-size: .8rem; text-align: center; opacity: .85; }
+
+.seat-picks { display: grid; gap: 8px; margin-top: 4px; }
