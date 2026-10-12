@@ -47,7 +47,10 @@ function savedName(): string {
 function saveName(n: string) {
     try { localStorage.setItem(NAME_KEY, n); } catch { /* storage unavailable */ }
 }
+const esc = (t: string) => t.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 const joinLink = (code: string) => `${location.origin}${location.pathname}?room=${code}`;
+/** A link that carries this guest's seat token, so opening it on any device (or after clearing the browser) restores the seat. */
+const seatLink = (o: OnlineSeat) => `${joinLink(o.code)}&seat=${encodeURIComponent(o.token)}`;
 
 const FREE_EQUALS: Tile = { symbol: '=', points: 0, expr_multiplier: 1 };
 
@@ -69,7 +72,8 @@ const S = {
     rackSyms: [] as string[],            // the same order as tile symbols, so your arrangement survives drawing new tiles
     preview: null as Preview | null,
     busy: null as null | 'submitting' | 'thinking',
-    modal: null as null | 'help' | 'calc' | 'swap' | 'pass' | 'forfeit' | 'over' | 'account',
+    modal: null as null | 'help' | 'calc' | 'swap' | 'pass' | 'forfeit' | 'over' | 'account' | 'reclaim' | 'approve',
+    reclaim: null as null | { code: string; seats: { seat: string; label: string }[]; waiting?: { seat: string; label: string } },   // a locked-out guest asking for their seat back
     swapPick: new Set<number>(),
     zoom: 1,
     fresh: new Set<string>(),       // cells that just got a tile (for the pop animation)
@@ -317,6 +321,7 @@ async function openSolo(id: string, push = true) {
     S.gameId = id;
     S.screen = 'game';
     S.modal = S.game.game_over ? 'over' : null;
+    syncReclaimPrompt();
     S.zoom = 1;
     S.fresh.clear();
     resetTurnState();
@@ -550,6 +555,7 @@ async function pollOnce() {
         else if (theirs && lm) showToast(describeMove(lm.player, lm.action, lm.tiles?.length ?? 0, lm.score_delta));
         resetTurnState();   // the board changed under any tiles you were trying, so start the turn fresh
         if (S.game.game_over) { S.modal = 'over'; saveSeat(null); stopPolling(); }
+        syncReclaimPrompt();
         render();
         if (theirs) centerOnLastMove();
     } catch (e) {
@@ -605,7 +611,78 @@ async function joinOnline(code: string) {
     const name = readName();
     code = code.trim().toUpperCase();
     if (!code) { showToast('Enter a game code'); return; }
-    try { await enterRoom(await room.join(code, name, loadSaved()?.code === code ? loadSaved()!.token : '')); } catch (e) { showToast((e as Error).message); }
+    try { await enterRoom(await room.join(code, name, loadSaved()?.code === code ? loadSaved()!.token : '')); }
+    catch (e) {
+        const msg = (e as Error).message;
+        if (/already has two players/i.test(msg)) void offerReclaim(code); else showToast(msg);
+    }
+}
+
+// ─────────────────────────────────────────────
+// Getting a seat back: a guest who lost their seat token asks the player still in the game to approve them.
+// ─────────────────────────────────────────────
+let reclaimTimer = 0;
+const stopReclaimPoll = () => { clearTimeout(reclaimTimer); reclaimTimer = 0; };
+
+async function offerReclaim(code: string) {
+    try {
+        const r = await room.seats(code);
+        S.reclaim = { code, seats: r.seats };
+        openModal('reclaim');
+    } catch (e) { showToast((e as Error).message); }
+}
+
+async function requestSeat(seat: string) {
+    const rc = S.reclaim;
+    if (!rc) return;
+    try {
+        const req = await room.reclaim(rc.code, seat);
+        rc.waiting = rc.seats.find(s => s.seat === seat);
+        render();
+        const poll = async () => {
+            if (S.reclaim !== rc) return;
+            try {
+                const r = await room.reclaimStatus(rc.code, req.request_id, req.secret);
+                if (S.reclaim !== rc) return;
+                if (r.status === 'approved' && r.seat && r.token) {
+                    S.reclaim = null; S.modal = null;
+                    await enterRoom({ code: rc.code, seat: r.seat, token: r.token });
+                    return;
+                }
+                if (r.status === 'denied') { rc.waiting = undefined; showToast("They didn't recognise that request."); render(); return; }
+            } catch (e) {
+                if (/expired/i.test((e as Error).message)) { rc.waiting = undefined; showToast('That request expired. You can ask again.'); render(); return; }
+            }
+            reclaimTimer = window.setTimeout(() => void poll(), 2000);
+        };
+        stopReclaimPoll();
+        reclaimTimer = window.setTimeout(() => void poll(), 2000);
+    } catch (e) { showToast((e as Error).message); }
+}
+
+function cancelReclaim() {
+    stopReclaimPoll();
+    S.reclaim = null;
+    closeModal();
+}
+
+/** The player still in the game is asked to let the other one back in (only they can tell whether it is really them). */
+function syncReclaimPrompt() {
+    const pending = S.online && S.game?.joined && !S.game.game_over ? S.game.reclaim_requests ?? [] : [];
+    if (pending.length && (S.modal === null)) { S.modal = 'approve'; }
+    else if (!pending.length && S.modal === 'approve') { S.modal = null; }
+}
+
+async function answerReclaim(approve: boolean) {
+    const o = S.online, req = S.game?.reclaim_requests?.[0];
+    if (!o || !req) { closeModal(); return; }
+    S.game!.reclaim_requests = S.game!.reclaim_requests!.slice(1);
+    S.modal = null;
+    render();
+    try {
+        await room.answerReclaim(o.code, o.token, req.id, approve);
+        showToast(approve ? `${req.label} is back in the game` : 'Request declined');
+    } catch (e) { showToast((e as Error).message); }
 }
 
 function readName(): string {
@@ -932,6 +1009,7 @@ function lobbyHtml(g: GameState): string {
             <p class="muted">Send this code or link to your friend:</p>
             <div class="code">${code}</div>
             <button class="primary" data-act="copy-link">Copy invite link</button>
+            ${S.user ? '' : '<button class="ghost wide" data-act="copy-seat-link">Copy my seat link</button>'}
             <p class="waiting">Waiting for ${display(otherSeat())} to join<span class="dots"></span></p>
             <p class="muted small">${g.labels?.[S.online!.seat] ? `You're playing as ${g.labels[S.online!.seat]}. ` : ''}${S.user ? 'Your game is saved to your account, so you can pick it up on any device.' : 'Guest games stay on this device. Sign in to switch devices.'}</p>
         </main>
@@ -1108,6 +1186,12 @@ function bellHtml(): string {
     return `<button class="icon bell ${on ? 'on' : ''}" data-act="push-bell" aria-label="${on ? 'Notifications on' : 'Notify me on my turn'}" title="${on ? 'Notifications on' : 'Notify me when it is my turn'}">${ico(on ? 'bell-on' : 'bell')}</button>`;
 }
 
+/** Guests have no account to sign back in with, so offer a private link that restores their seat on any device. */
+function seatLinkHtml(): string {
+    if (!S.online || S.user) return '';
+    return `<button class="icon" data-act="copy-seat-link" aria-label="Copy a link to get back to your seat" title="Copy a link to get back to your seat">${ico('link')}</button>`;
+}
+
 function gameHtml(): string {
     const g = S.game!;
     if (S.online && !g.joined) return lobbyHtml(g);
@@ -1118,6 +1202,7 @@ function gameHtml(): string {
             <span class="wordmark small">Equadium</span>
             <span class="bar-right">
                 ${bellHtml()}
+                ${seatLinkHtml()}
                 ${canForfeit(g) ? `<button class="icon flag" data-act="forfeit" aria-label="Forfeit game" title="Forfeit">${ico('flag')}</button>` : ''}
                 <button class="icon calc" data-act="calc" aria-label="Derivative and integral table" title="Calculus cheat sheet">∫</button>
                 <button class="icon" data-act="help" aria-label="How to play">?</button>
@@ -1238,6 +1323,24 @@ function modalHtml(): string {
             ${pushRowHtml()}
             <button class="primary" data-act="stats">View my stats</button>
             <button class="ghost wide full" data-act="signout">Sign out</button>`;
+            break;
+        }
+        case 'reclaim': {
+            const rc = S.reclaim;
+            if (!rc) break;
+            body = rc.waiting
+                ? `<h2>Waiting for approval</h2><p class="muted">We asked the other player to let you back in as <strong>${esc(rc.waiting.label)}</strong>. Keep this page open.</p>
+                <div class="modal-actions"><button class="ghost wide" data-act="reclaim-cancel">Cancel</button></div>`
+                : `<h2>This game is full</h2><p class="muted">Were you already playing in it? Pick your seat and the other player can let you back in.</p>
+                <div class="seat-picks">${rc.seats.map(s => `<button class="ghost wide full" data-act="reclaim-pick" data-seat="${s.seat}">I'm ${esc(s.label)}</button>`).join('')}</div>
+                <div class="modal-actions"><button class="ghost wide" data-act="reclaim-cancel">Never mind</button></div>`;
+            break;
+        }
+        case 'approve': {
+            const req = g?.reclaim_requests?.[0];
+            if (!req) break;
+            body = `<h2>Let ${esc(req.label)} back in?</h2><p class="muted">Someone is asking to take over the ${esc(req.label)} seat. Only say yes if it's really them: they'll replace whoever is on that seat now.</p>
+            <div class="modal-actions"><button class="ghost wide" data-act="reclaim-deny">Not them</button><button class="primary" data-act="reclaim-approve">Let them in</button></div>`;
             break;
         }
         default:
@@ -1374,6 +1477,14 @@ app.addEventListener('click', (e) => {
                 void navigator.clipboard?.writeText(joinLink(S.online!.code))
                     .then(() => showToast('Invite link copied'), () => showToast(`Share this code: ${S.online!.code}`));
                 break;
+            case 'copy-seat-link':
+                if (S.online) void navigator.clipboard?.writeText(seatLink(S.online))
+                    .then(() => showToast('Seat link copied. Keep it private: it lets whoever opens it play as you.'), () => showToast("Couldn't copy the link"));
+                break;
+            case 'reclaim-pick': void requestSeat(actEl.dataset.seat!); break;
+            case 'reclaim-cancel': cancelReclaim(); break;
+            case 'reclaim-approve': void answerReclaim(true); break;
+            case 'reclaim-deny': void answerReclaim(false); break;
             case 'signin': void signInWithGoogle().catch(err => showToast((err as Error).message)); break;
             case 'push-bell': void togglePush(true); break;
             case 'push-toggle': void togglePush(false); break;
@@ -1532,6 +1643,11 @@ void (async () => {
     if (pending && !new URLSearchParams(location.search).get('room')) history.replaceState(null, '', `${location.pathname}?room=${pending}#/online`);
 
     const invite = new URLSearchParams(location.search).get('room')?.toUpperCase();
+    const seatToken = new URLSearchParams(location.search).get('seat');
+    if (seatToken) {   // a seat link: trade the token for the seat, then drop it from the address bar
+        if (invite) { try { saveSeat(await room.join(invite, savedName(), seatToken)); } catch { /* fall through to the normal join form */ } }
+        history.replaceState(history.state, '', `${location.pathname}${invite ? `?room=${invite}` : ''}${location.hash}`);
+    }
     let route: Route = parseHash(location.hash);
     if (invite) {
         const saved = loadSaved();

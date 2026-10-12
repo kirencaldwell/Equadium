@@ -16,6 +16,7 @@ const PATHS: Record<string, string> = {
     target: '<circle cx="12" cy="12" r="3.2"/><path d="M12 3v3.5M12 17.5V21M3 12h3.5M17.5 12H21"/>',
     bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 21a2 2 0 0 0 4 0"/>',
     'bell-on': '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z" fill="currentColor" fill-opacity=".18"/><path d="M10 21a2 2 0 0 0 4 0"/>',
+    link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
     close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
     play: '<path d="M7.5 5l11 7-11 7z"/>',
     pause: '<path d="M8.5 5v14M15.5 5v14"/>',

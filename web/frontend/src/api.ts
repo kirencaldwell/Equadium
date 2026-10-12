@@ -75,6 +75,13 @@ export const room = {
         call<ActionResult>(`/rooms/${code}/pass`, authed(token, { method: 'POST' })),
     forfeit: (code: string, token: string) =>
         call<ActionResult>(`/rooms/${code}/forfeit`, authed(token, { method: 'POST' })),
+    // A guest who lost their seat token asks the player still in the game to hand the seat back.
+    seats: (code: string) => call<{ full: boolean; seats: { seat: string; label: string }[] }>(`/rooms/${encodeURIComponent(code)}/seats`),
+    reclaim: (code: string, seat: string) => call<{ request_id: string; secret: string }>(`/rooms/${encodeURIComponent(code)}/reclaim`, json({ seat })),
+    reclaimStatus: (code: string, id: string, secret: string) =>
+        call<{ status: 'pending' | 'denied' | 'approved'; seat?: string; token?: string }>(`/rooms/${encodeURIComponent(code)}/reclaim/${id}`, { headers: { 'X-Reclaim-Secret': secret } }),
+    answerReclaim: (code: string, token: string, id: string, approve: boolean) =>
+        call<{ approved: boolean }>(`/rooms/${code}/reclaim/${id}/${approve ? 'approve' : 'deny'}`, authed(token, { method: 'POST' })),
 };
 
 export interface PushSub { endpoint: string; keys: { p256dh: string; auth: string } }
