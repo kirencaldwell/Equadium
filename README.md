@@ -206,3 +206,14 @@ pytest core web
 ## License
 
 © 2026 Kiren Caldwell. All rights reserved (see `LICENSE`). The home screen shows the same notice.
+
+## Game analytics (for tuning, not shown to players)
+
+Every finished game writes one anonymous record (each turn's score and tiles, final scores, end reason) to the
+Firestore collection `game_analytics`. Summarise it from your own machine, with the same two variables as the API:
+
+```
+FIREBASE_PROJECT_ID=... FIREBASE_SERVICE_ACCOUNT='{...json...}' python -m web.api.analytics_report --csv turns.csv
+```
+
+It prints score percentiles per turn and per game, turns per game and end reasons; `--csv` also writes one row per turn.
