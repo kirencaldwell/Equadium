@@ -417,7 +417,6 @@ def test_chained_equality_can_be_played_on_the_board():
     "d/dx(cos(x))=-sin(x)",
     "int(sin(x))=-cos(x)+C",
     "d/dx(x**2-x)=2x-1",
-    "-x+x=x-x",
 ])
 def test_minus_tile_valid_equations(equation):
     ok, msg = fresh_session().game.math.validate_equation(equation)
@@ -456,6 +455,26 @@ def test_agent_plays_the_minus_tile_legally():
 def test_new_tiles_and_stacked_calculus_are_valid(equation):
     ok, msg = fresh_session().game.math.validate_equation(equation)
     assert ok, msg
+
+
+@pytest.mark.parametrize("equation", [
+    "d/dx(2)=d/dx(3)",                                       # 0 = 0
+    "d/dx(2)sin(x)cos(x)x**3=d/dx(3)ln(x)sin(x)",            # zero times anything, both sides
+    "d/dx(2)sin(x)cos(x)+x=x",                               # a zero factor padding a true line
+    "x-x=d/dx(a)",
+    "-x+x=x-x",
+    "(x-x)sin(x)+x=x",                                       # a bracket that is zero
+    "d/dx(2)=d/dx(3)=d/dx(a)",
+])
+def test_zero_cannot_pad_out_an_equation(equation):
+    ok, msg = fresh_session().game.math.validate_equation(equation)
+    assert not ok and "0" in msg
+
+
+def test_ordinary_calculus_still_valid():
+    math = fresh_session().game.math
+    for equation in ("d/dx(x**2)=2x", "d/dx(d/dx(x**3))=3*2x", "int(1)=x+C", "d/dx(x**2)+x=3x"):
+        assert math.validate_equation(equation)[0], equation
 
 
 def test_multipliers_add_not_multiply():

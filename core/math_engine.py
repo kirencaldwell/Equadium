@@ -6,6 +6,11 @@ import sympy as sp
 import sympy as sp
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
 
+class TrivialZeroError(ValueError):
+    """A group of tiles that works out to 0 (d/dx of a constant, x-x...). Zero times anything is 0, so it would let a
+    play pad a line with high-value tiles that do no work."""
+
+
 class MathEngine:
     def __init__(self, config):
         self.config = config
@@ -152,7 +157,12 @@ class MathEngine:
             self._consts, self._collecting = [], True
             try:
                 first = self._parse_token_list(stripped[0])
-                diffs = [self._parse_token_list(part) - first for part in stripped[1:]]
+                self._reject_zero(first, "a side of the equation")
+                diffs = []
+                for part in stripped[1:]:
+                    value = self._parse_token_list(part)
+                    self._reject_zero(value, "a side of the equation")
+                    diffs.append(value - first)
                 consts = list(self._consts)
             finally:
                 self._collecting = False
@@ -160,6 +170,8 @@ class MathEngine:
                 consts.append(self.k)
             return self._constants_work(diffs, consts), "Valid"
 
+        except TrivialZeroError as e:
+            return False, str(e)
         except Exception as e:
             return False, f"Syntax Error: {e}"
 
@@ -294,6 +306,11 @@ class MathEngine:
                     return i
         raise ValueError(f"'{tokens[start]}' is never closed")
 
+    @staticmethod
+    def _reject_zero(value, what):
+        if value == 0:
+            raise TrivialZeroError(f"{what} works out to 0, which can't be used to pad out an equation")
+
     def _parse_token_list(self, tokens):
         """
         Parses a run of tiles. A d/dx( ) or int( ) group may sit anywhere in it, not only around a whole side:
@@ -309,6 +326,7 @@ class MathEngine:
                 inner = self._parse_token_list(tokens[i + 1:j])
                 if t == "d/dx(":
                     value = sp.diff(inner, self.x)
+                    self._reject_zero(value, "A derivative")
                 else:
                     c = sp.Symbol(f"_C{len(self._consts)}")
                     self._consts.append(c)
@@ -318,6 +336,11 @@ class MathEngine:
                 out.append(name)
                 i = j + 1
             else:
+                if t in ("(", "exp("):                         # a bracket that is 0 would zero out whatever it multiplies
+                    j = self._closing_index(tokens, i)
+                    n = len(self._consts)
+                    self._reject_zero(self._parse_token_list(tokens[i + 1:j]), "A bracket")
+                    del self._consts[n:]
                 out.append(t)
                 i += 1
         text = self._join_token_list(out).replace("e**x", "exp(x)").replace("e^x", "exp(x)")
