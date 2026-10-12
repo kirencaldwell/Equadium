@@ -280,6 +280,31 @@ def test_finished_game_records_stats_once(monkeypatch):
     assert client.get("/me/stats", headers=H()).json()["games"] == 1
 
 
+def test_finished_game_logs_anonymous_analytics_once(monkeypatch, env):
+    gid = finish_solo(monkeypatch, H())
+    rec = env._analytics[gid]
+    assert rec["mode"] == "human_vs_agent" and rec["end_reason"] and rec["turns"] == 2
+    assert [p["kind"] for p in rec["players"]] == ["human", "agent"]
+    assert rec["turn_log"][0]["action"] == "pass" and all({"n", "seat", "action", "score", "tiles"} <= t.keys() for t in rec["turn_log"])
+    assert ALICE not in json.dumps(rec) and "Alice" not in json.dumps(rec)      # nothing identifying
+    env._analytics.clear()
+    client.get(f"/games/{gid}", headers=H())
+    assert env._analytics == {}                                                  # already logged: no duplicate writes
+
+
+def test_guest_games_are_logged_too(monkeypatch, env):
+    monkeypatch.setitem(CONFIG, "max_turns", 2)
+    gid = new_game()
+    client.post(f"/games/{gid}/pass")
+    assert gid in env._analytics
+
+
+def test_analytics_failure_never_breaks_play(monkeypatch, env):
+    env.save_analytics = lambda rec: (_ for _ in ()).throw(RuntimeError("db down"))
+    gid = finish_solo(monkeypatch, H())
+    assert client.get("/me/stats", headers=H()).json()["games"] == 1
+
+
 def test_failed_result_write_is_retried_on_next_load(monkeypatch, env):
     real = env.save_results
     env.save_results = lambda rows: (_ for _ in ()).throw(RuntimeError("db down"))

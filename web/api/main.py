@@ -160,6 +160,8 @@ def _get_session(game_id: str, user: Optional[AuthUser] = None) -> GameSession:
 def _save(game_id: str, session: GameSession) -> None:
     """Write-through save for signed-in players' games (guests' games stay in memory)."""
     users = _seat_users(session)
+    if session.is_over:
+        persistence.record_analytics(game_id, "solo", session)    # anonymous, so guest games count too
     if not users or session.mode == "agent_vs_agent":
         return
     if session.is_over:

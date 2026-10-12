@@ -75,9 +75,39 @@ def result_rows(game_id: str, kind: str, session: GameSession, seat_users: Dict[
     return rows
 
 
+def analytics_record(game_id: str, kind: str, session: GameSession) -> dict:
+    """One anonymous record per finished game, for studying how the game plays (score distributions, game length,
+    how multiplier tiles are used). No user ids or names: only seat kinds, scores and the tiles of each play."""
+    g = session.game
+    seats = [s.name for s in g.players]
+    return {
+        "game_id": game_id, "kind": kind, "mode": session.mode, "finished_at": now_iso(),
+        "end_reason": g.end_reason, "forfeited": g.forfeited_by is not None, "turns": g.turns_played,
+        "players": [{"seat": i, "kind": session.seats[name].kind, "score": g.players[i].score,
+                     "winner": name in g.winners} for i, name in enumerate(seats)],
+        "turn_log": [{"n": n, "seat": seats.index(r.player) if r.player in seats else None, "action": r.action,
+                      "score": r.score_delta, "tiles": r.tiles or []}
+                     for n, r in enumerate(x for x in session.history if x.ok)],
+    }
+
+
+def record_analytics(game_id: str, kind: str, session: GameSession) -> None:
+    """Once per finished game, guest games included (computer-vs-computer practice games are skipped).
+    Failures are logged and retried on the next save; they never affect play."""
+    if not session.is_over or session.mode == "agent_vs_agent" or getattr(session, "analytics_saved", False):
+        return
+    try:
+        get_store().save_analytics(analytics_record(game_id, kind, session))
+        session.analytics_saved = True
+        logger.info("analytics game=%s mode=%s turns=%s", game_id, session.mode, session.game.turns_played)
+    except Exception:
+        logger.exception("Could not record analytics for game %s", game_id)
+
+
 def finalize_if_over(game_id: str, kind: str, session: GameSession, seat_users: Dict[str, str], **save_kwargs) -> None:
     """When a game has just ended: record each player's result, then mark it finished.
     Safe to call repeatedly (results are upserted), so a failed attempt heals on the next one."""
+    record_analytics(game_id, kind, session)
     if not session.is_over or not seat_users:
         return
     store = get_store()

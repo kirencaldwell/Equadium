@@ -41,6 +41,7 @@ class Store:
     def get_game(self, game_id: Optional[str] = None, code: Optional[str] = None) -> Optional[dict]: raise NotImplementedError
     def list_user_games(self, user_id: str, statuses=ACTIVE, limit: int = 20) -> List[dict]: raise NotImplementedError
     def save_results(self, rows: List[dict]) -> None: raise NotImplementedError
+    def save_analytics(self, rec: dict) -> None: raise NotImplementedError
     def list_results(self, user_id: str, limit: int = 1000) -> List[dict]: raise NotImplementedError
     def upsert_profile(self, user_id: str, display_name: Optional[str], avatar_url: Optional[str]) -> None: raise NotImplementedError
     def get_profile(self, user_id: str) -> Optional[dict]: raise NotImplementedError
@@ -60,6 +61,7 @@ class MemoryStore(Store):
     def __init__(self):
         self._games: Dict[str, dict] = {}
         self._results: Dict[tuple, dict] = {}
+        self._analytics: Dict[str, dict] = {}
         self._profiles: Dict[str, dict] = {}
         self._push: Dict[str, dict] = {}
         self._lock = threading.Lock()
@@ -90,6 +92,10 @@ class MemoryStore(Store):
         with self._lock:
             for r in rows:
                 self._results[(r["game_id"], r["user_id"])] = {**r, "finished_at": r.get("finished_at", now_iso())}
+
+    def save_analytics(self, rec):
+        with self._lock:
+            self._analytics[rec["game_id"]] = copy.deepcopy(rec)
 
     def list_results(self, user_id, limit=1000):
         with self._lock:
@@ -197,6 +203,9 @@ class FirestoreStore(Store):
     def save_results(self, rows):
         for r in rows:
             self.db.collection("game_results").document(f"{r['game_id']}__{r['user_id']}").set(r, timeout=self.timeout)
+
+    def save_analytics(self, rec):
+        self.db.collection("game_analytics").document(rec["game_id"]).set(rec, timeout=self.timeout)
 
     def list_results(self, user_id, limit=1000):
         query = self._where(self.db.collection("game_results"), "user_id", "==", user_id)
