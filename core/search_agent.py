@@ -73,6 +73,8 @@ def _tile_value(symbol: str) -> Optional[Tuple[float, ...]]:
             v = math.log(abs(x))  # real part of log(x); the engine is the final judge
         elif symbol == "1/x":
             v = 1 / x
+        elif symbol == "i":
+            v = 1j
         elif symbol == "k":
             v = k
         elif symbol == "a":
@@ -91,9 +93,11 @@ def _tile_value(symbol: str) -> Optional[Tuple[float, ...]]:
 
 
 def _key(vec) -> Optional[tuple]:
-    if any(not math.isfinite(v) for v in vec):
+    """Hashable fingerprint of a value vector (floats, or complex once an `i` is involved)."""
+    if any(not cmath.isfinite(v) for v in vec):
         return None
-    return tuple(round(v, _ROUND) for v in vec)
+    # "+ 0.0" turns -0.0 into 0.0 so that equal values share a key
+    return tuple(complex(round(complex(v).real, _ROUND) + 0.0, round(complex(v).imag, _ROUND) + 0.0) for v in vec)
 
 
 # d/dx and integral fingerprints depend only on the expression, so every agent
@@ -119,7 +123,7 @@ def _engine_hash() -> str:
 
 
 def cache_header() -> dict:
-    return {"schema": 1, "engine": _engine_hash(), "sympy": sp.__version__, "samples": [list(p) for p in SAMPLES]}
+    return {"schema": 2, "engine": _engine_hash(), "sympy": sp.__version__, "samples": [list(p) for p in SAMPLES]}
 
 
 def load_cache_file(path: str = CACHE_FILE) -> bool:
@@ -136,7 +140,7 @@ def load_cache_file(path: str = CACHE_FILE) -> bool:
             _PAIR_CACHE[(kind, *toks)] = bad
         for key, vec in data["calculus"].items():
             kind, *toks = key.split(_SEP)
-            _CALCULUS_CACHE[(kind, tuple(toks))] = tuple(vec) if vec is not None else None
+            _CALCULUS_CACHE[(kind, tuple(toks))] = tuple(complex(re_, im) for re_, im in vec) if vec is not None else None
         return True
     except FileNotFoundError:
         return False
@@ -178,8 +182,11 @@ def compute_calculus_vec(engine, kind: str, inner_tokens: tuple) -> Optional[Tup
         if not res.has(sp.Integral, sp.Piecewise, sp.zoo, sp.nan):
             f = sp.lambdify((x, a, b, k), res, _CMATH_NAMESPACE)
             vals = [complex(f(*pt)) for pt in SAMPLES]
-            if all((abs(v.imag) < 1e-9 or res.has(sp.log)) and math.isfinite(v.real) for v in vals):
-                return tuple(v.real for v in vals)
+            if res.has(sp.log):
+                # the ln(x) tile stands for the real part of log(x) (see _tile_value), so compare real parts
+                vals = [complex(v.real) for v in vals]
+            if all(cmath.isfinite(v) for v in vals):
+                return tuple(vals)
     except Exception:
         pass
     return None
@@ -244,7 +251,7 @@ class SearchAgent:
         return Move(tiles_to_swap=self._choose_swap(player))
 
     # Tiles that are only useful in small numbers: more than this many are dead weight.
-    _KEEP_AT_MOST = {"C": 1, ")": 2, "exp(": 1, "d/dx(": 1, "int(": 1, "+": 2, "=": 1, "i": 0, "(": 1}   # the agent never plays i yet
+    _KEEP_AT_MOST = {"C": 1, ")": 2, "exp(": 1, "d/dx(": 1, "int(": 1, "+": 2, "=": 1, "i": 2, "(": 1}
 
     def _choose_swap(self, player):
         """Throw back surplus tiles of types we can't use many of, plus
@@ -371,7 +378,7 @@ class SearchAgent:
                 elif s == ")":
                     outer_total, outer_term, outer_neg, is_exp = frames.pop()
                     inner = tuple(t + p for t, p in zip(total, term))
-                    val = tuple(math.exp(v) if v < 50 else math.inf for v in inner) if is_exp else inner
+                    val = tuple(cmath.exp(v) if v.real < 50 else math.inf for v in inner) if is_exp else inner
                     if outer_term is not None:
                         new_term = tuple(p * q for p, q in zip(outer_term, val))
                     else:

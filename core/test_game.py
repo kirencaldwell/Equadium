@@ -572,7 +572,7 @@ def test_precomputed_values_match_fresh_computation():
         fresh, stored = sa.compute_calculus_vec(engine, kind, tuple(toks)), data["calculus"][key]
         assert (fresh is None) == (stored is None), key
         if fresh is not None:
-            assert all(abs(a - b) < 1e-9 * max(1, abs(a)) for a, b in zip(fresh, stored)), key
+            assert all(abs(a - complex(*b)) < 1e-9 * max(1, abs(a)) for a, b in zip(fresh, stored)), key
     for key in rng.sample(sorted(data["pairs"]), 25):
         kind, *toks = key.split(sa._SEP)
         a, b = (toks[0], toks[1]) if kind == "p" else (toks[0], None) if kind == "e<" else (None, toks[0])
@@ -669,3 +669,14 @@ def test_forfeit_survives_saving_and_old_saves_still_load():
     legacy = fresh_session().to_dict()
     del legacy["game"]["forfeited_by"]                                # a game saved before forfeits existed
     assert GameSession.from_dict(legacy, CONFIG).game.forfeited_by is None
+
+
+def test_search_agent_plays_the_imaginary_unit():
+    # The seed tile is x; with these tiles a play must use i to reach an equation (i*i = -1 style, or exp(ix) forms).
+    s = fresh_session("agent_vs_agent", rack0=["i", "i", "=", "-", "1", "x", "2"])
+    agent = SearchAgent("t", CONFIG)
+    move = agent.find_best_move(s.game)
+    assert move is not None
+    assert any(t.symbol == "i" for _, _, t in move.tiles_to_play)
+    _, err = s.game.evaluate_play(move.tiles_to_play, move.direction)
+    assert err is None
