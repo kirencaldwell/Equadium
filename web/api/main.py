@@ -206,6 +206,12 @@ def _result(session, record, agent_records):
 SOLO_MODES = ("human_vs_agent", "agent_vs_agent")
 
 
+@app.get("/health")
+def health():
+    """Cheap liveness check for the keep-alive ping (.github/workflows/keepalive.yml)."""
+    return {"status": "ok"}
+
+
 @app.get("/modes")
 def list_modes():
     return {mode: [{"name": n, "kind": k} for n, k in MODES[mode]] for mode in SOLO_MODES}
