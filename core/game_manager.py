@@ -1,4 +1,4 @@
-from core.game_entities import Board, Move, Player, Tile, make_tile
+from core.game_entities import Board, Move, Player, Tile, make_tile, is_cosmetic_equation
 from core.math_engine import MathEngine
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -179,9 +179,11 @@ class EquadiumGame:
     @staticmethod
     def score_play(equations_data, move_tiles) -> int:
         """Points for a play: each equation's tile points, times the multipliers of newly placed tiles in it.
-        Multipliers add (a 3x and a 2x tile make 5x, not 6x)."""
+        Multipliers add (a 3x and a 2x tile make 5x, not 6x). Cosmetic equations (see is_cosmetic_equation) score 0."""
         total = 0
         for _, eq_tiles in equations_data:
+            if is_cosmetic_equation([t.symbol for t in eq_tiles]):
+                continue                       # a reordering or 1-padding: legal, but it scores nothing
             boosts = [placed_tile.expr_multiplier for _, _, placed_tile in move_tiles
                       if placed_tile in eq_tiles and placed_tile.expr_multiplier > 1]
             total += sum(t.points for t in eq_tiles) * (sum(boosts) or 1)

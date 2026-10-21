@@ -680,3 +680,33 @@ def test_search_agent_plays_the_imaginary_unit():
     assert any(t.symbol == "i" for _, _, t in move.tiles_to_play)
     _, err = s.game.evaluate_play(move.tiles_to_play, move.direction)
     assert err is None
+
+
+# ---- cosmetic equations score nothing ----
+@pytest.mark.parametrize("tiles, expected", [
+    (["(x+a)", "=", "a", "+", "x"], False),                 # (x+a) is one tile, so this one does real work
+    (["x", "+", "a", "=", "a", "+", "x"], True),            # reordering
+    (["x", "1", "=", "x"], True),                           # x1 = x: 1 padding
+    (["(", "x", ")", "=", "x"], True),                      # extra brackets
+    (["2", "x", "=", "x", "2"], True),
+    (["d/dx(", "x", ")", "=", "1"], False),
+    (["x", "+", "1", "-", "1", "=", "x"], False),            # + and - make real work
+    (["x", "=", "x"], False),                               # identical sides: the opening line stays worth points
+    (["x", "=", "x", "=", "1", "x"], True),                  # every link of a chain is cosmetic
+])
+def test_is_cosmetic_equation(tiles, expected):
+    from core.game_entities import is_cosmetic_equation
+    assert is_cosmetic_equation(tiles) is expected
+
+
+def test_cosmetic_equation_scores_zero():
+    from core.game_entities import Tile
+    from core.game_manager import EquadiumGame as GameManager
+    cfg = CONFIG["tiles"]
+    mk = lambda s: Tile(s, cfg.get(s, {"points": 0})["points"])
+    cosmetic = [(None, mk(s)) for s in ["x", "+", "a", "=", "a", "+", "x"]]
+    real = [(None, mk(s)) for s in ["x", "+", "x", "=", "2", "x"]]
+    placed = [(0, 0, t) for _, t in cosmetic]
+    assert GameManager.score_play([("eq", [t for _, t in cosmetic])], placed) == 0
+    placed = [(0, 0, t) for _, t in real]
+    assert GameManager.score_play([("eq", [t for _, t in real])], placed) > 0

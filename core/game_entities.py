@@ -19,6 +19,29 @@ class Move:
     def is_pass(self):
         return not self.is_play and not self.is_swap
 
+def is_cosmetic_equation(symbols) -> bool:
+    """
+    True for an equation that only dresses a line up without doing any maths: both sides use the same tiles once
+    brackets and 1 tiles (x1 = x) are ignored, so it is a reordering (x+a = a+x), a bracket change or 1 padding.
+    A chain a = b = c is cosmetic when every link is. Cosmetic equations are legal but score nothing.
+    The exception is a line with the same tiles on both sides (x = x): that is the one way to open a game.
+    """
+    parts, cur = [], []
+    for t in symbols:
+        if t == "=":
+            parts.append(cur)
+            cur = []
+        else:
+            cur.append(t)
+    parts.append(cur)
+    if len(parts) < 2 or any(not p for p in parts):
+        return False
+    if all(a == b for a, b in zip(parts, parts[1:])):
+        return False
+    key = lambda p: sorted(t for t in p if t not in ("(", ")", "1"))
+    return all(key(a) == key(b) for a, b in zip(parts, parts[1:]))
+
+
 class Tile:
     def __init__(self, symbol, points, expr_multiplier=1):
         self.symbol = symbol

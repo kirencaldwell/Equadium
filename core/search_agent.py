@@ -37,7 +37,8 @@ from typing import Dict, List, Optional, Tuple
 
 import sympy as sp
 
-from core.game_entities import Move, make_tile
+
+from core.game_entities import Move, is_cosmetic_equation, make_tile
 
 logger = logging.getLogger("equadium.search_agent")
 
@@ -474,6 +475,8 @@ class SearchAgent:
         return scan(-1), scan(1)
 
     def _estimate_score(self, tokens, anchor_idx) -> int:
+        if is_cosmetic_equation(tokens):
+            return 0
         pts, boosts = 0, 0
         for i, s in enumerate(tokens):
             pts += self.points.get(s, 0)
