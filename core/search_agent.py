@@ -486,6 +486,7 @@ class SearchAgent:
 
     def find_best_move(self, game) -> Optional[Move]:
         self._deadline = time.monotonic() + self.time_budget
+        self.last_candidates = []
         player = game.players[game.current_turn_index]
         board = game.board
         bad_pairs = self._adjacency_blacklist(game)
@@ -528,6 +529,7 @@ class SearchAgent:
                 self._collect(game, candidates, seen, (r, c, direction), t, self.value_tiles[t], short,
                               pool, rack, before, after, bad_pairs)
 
+        self.last_candidates = candidates      # read by core.game_quality to measure how many plays a turn offers
         if not candidates:
             return None
         candidates.sort(key=lambda cand: cand[1].score, reverse=True)
