@@ -193,6 +193,30 @@ def compute_calculus_vec(engine, kind: str, inner_tokens: tuple) -> Optional[Tup
     return None
 
 
+_SIDE_CACHE: Dict[tuple, Optional[tuple]] = {}
+
+
+def side_key(engine, tokens: tuple) -> Optional[tuple]:
+    """Fingerprint of one side of an equation already on the board (any tiles, calculus included), so a play can
+    extend the line with "= <something equal>". None for sides whose value isn't fixed (integrals, k, C)."""
+    if tokens in _SIDE_CACHE:
+        return _SIDE_CACHE[tokens]
+    key = None
+    if not any(t in ("int(", "k", "C") for t in tokens):
+        try:
+            x, a, b, k = sp.symbols("x a b k")
+            expr = engine._parse_token_list(list(tokens))
+            f = sp.lambdify((x, a, b, k), expr, _CMATH_NAMESPACE)
+            vals = [complex(f(*pt)) for pt in SAMPLES]
+            if expr.has(sp.log):
+                vals = [complex(v.real) for v in vals]   # see compute_calculus_vec
+            key = _key(vals)
+        except Exception:
+            key = None
+    _SIDE_CACHE[tokens] = key
+    return key
+
+
 load_cache_file()
 
 
@@ -524,6 +548,7 @@ class SearchAgent:
         candidates: List[Tuple[tuple, Candidate]] = []
         seen = set()
         self._join_candidates(candidates, seen, pool, rack, anchors, bad_pairs)
+        self._extend_candidates(game, candidates, seen, pool, rack, bad_pairs)
         for r, c, direction, t, before, after in anchors:
             if t in self.value_tiles:
                 self._collect(game, candidates, seen, (r, c, direction), t, self.value_tiles[t], short,
@@ -626,6 +651,67 @@ class SearchAgent:
                                 candidates.append(((r, c, direction),
                                                    Candidate(seq, idx, self._estimate_score(seq, idx))))
 
+    def _extend_candidates(self, game, candidates, seen, pool, rack, bad_pairs):
+        """
+        Extend an equation already on the board into a chain: "<line> = E" after its end, or "E = <line>" before its
+        start, where E (from the rack) equals the side it joins. The whole line, board tiles included, scores, so a
+        play that builds on many tiles pays like a long word in Scrabble.
+        """
+        board = game.board
+        strip = lambda toks: Counter(t for t in toks if t not in ("(", ")", "1"))
+        for r in range(board.height):
+            for c in range(board.width):
+                if board.grid[r][c] is None:
+                    continue
+                for direction, (dr, dc) in (("H", (0, 1)), ("V", (1, 0))):
+                    pr, pc = r - dr, c - dc
+                    if 0 <= pr < board.height and 0 <= pc < board.width and board.grid[pr][pc] is not None:
+                        continue                                           # not the start of a run
+                    run, rr, cc = [], r, c
+                    while 0 <= rr < board.height and 0 <= cc < board.width and board.grid[rr][cc] is not None:
+                        run.append(board.grid[rr][cc].symbol)
+                        rr, cc = rr + dr, cc + dc
+                    if len(run) < 3 or "=" not in run:
+                        continue
+                    last_r, last_c = rr - dr, cc - dc
+                    parts, cur = [], []
+                    for t in run:
+                        if t == "=":
+                            parts.append(tuple(cur))
+                            cur = []
+                        else:
+                            cur.append(t)
+                    parts.append(tuple(cur))
+                    room_before = self._free_room(board, r, c, dr, dc)[0]
+                    room_after = self._free_room(board, last_r, last_c, dr, dc)[1]
+                    for at_end, side, room in ((True, parts[-1], room_after), (False, parts[0], room_before)):
+                        if room < 2 or not side:
+                            continue
+                        k = side_key(game.math, side)
+                        if k is None:
+                            continue
+                        for e_tokens, _, _ in pool.get(k, ()):
+                            if len(e_tokens) + 1 > room or strip(e_tokens) == strip(side):
+                                continue
+                            need = Counter(e_tokens)
+                            need["="] += 1
+                            if any(rack.get(t, 0) < n for t, n in need.items()):
+                                continue
+                            new = ["="] + list(e_tokens) if at_end else list(e_tokens) + ["="]
+                            line = run + new if at_end else new + run
+                            if not self._adjacency_ok(line, bad_pairs):
+                                continue
+                            start = (last_r + dr, last_c + dc) if at_end else (r - len(new) * dr, c - len(new) * dc)
+                            where = (start[0], start[1], direction)
+                            sig = (where, tuple(new), None)
+                            if sig in seen:
+                                continue
+                            seen.add(sig)
+                            boosts = sum(self.mult.get(t, 1) for t in new if self.mult.get(t, 1) > 1)
+                            score = 0 if is_cosmetic_equation(line) else \
+                                sum(self.points.get(t, 0) for t in line) * (boosts or 1)
+                            candidates.append((where, Candidate(new, None, score)))
+
     def _collect(self, game, candidates, seen, where, t, vt, short, pool, rack,
                  room_before, room_after, bad_pairs):
         r, c, direction = where
@@ -677,7 +763,10 @@ class SearchAgent:
     def _to_move(self, game, player, where, cand: Candidate) -> Optional[Move]:
         r, c, direction = where
         dr, dc = (0, 1) if direction == "H" else (1, 0)
-        start_r, start_c = r - cand.anchor_idx * dr, c - cand.anchor_idx * dc
+        if cand.anchor_idx is None:                    # an extension: every token is new, starting at `where`
+            start_r, start_c = r, c
+        else:
+            start_r, start_c = r - cand.anchor_idx * dr, c - cand.anchor_idx * dc
         available = list(player.rack)
         placed = []
         for i, symbol in enumerate(cand.tokens):
