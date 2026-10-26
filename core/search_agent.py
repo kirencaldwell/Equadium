@@ -220,6 +220,21 @@ def side_key(engine, tokens: tuple) -> Optional[tuple]:
 load_cache_file()
 
 
+def _group_adds(tokens) -> bool:
+    """Does the innermost open "(" group hold a + or -? Only then do its brackets change what the line means."""
+    depth = 0
+    for t in reversed(tokens):
+        if t == ")":
+            depth += 1
+        elif t in ("(", "exp(", "d/dx(", "int("):
+            if depth == 0:
+                return False
+            depth -= 1
+        elif depth == 0 and t in ("+", "-"):
+            return True
+    return False
+
+
 class Candidate:
     __slots__ = ("tokens", "anchor_idx", "score")
 
@@ -377,6 +392,8 @@ class SearchAgent:
                 if s == ")":
                     if not (frames and last_is_value):
                         continue
+                    if not frames[-1][3] and not _group_adds(tokens):
+                        continue        # "(xx)" and "(x)" only dress the line up; "(x+a)b" can change the maths
                 elif s == "+":
                     if not last_is_value or n >= max_len:
                         continue
