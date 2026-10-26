@@ -6,6 +6,7 @@ CONFIG = {
     "max_rack_size": 16,
     "require_plus_c": True,
     "max_turns": 75,
+    "free_brackets": False,  # "(" and ")" are an unlimited free supply: not in the bag, placed straight from the pile
     "stall_rounds": 3,  # game ends after this many full rounds with no tiles played (0 = off)
     "tiles": {
         # Variables & Polynomials

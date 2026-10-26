@@ -301,6 +301,8 @@ class EquadiumGame:
     def _initialize_normal_bag(self):
         bag = []
         for symbol, data in self.config["tiles"].items():
+            if self.config.get("free_brackets") and symbol in ("(", ")"):
+                continue                       # brackets are a free pile, not in the bag
             bag.extend([make_tile(symbol, self.config) for _ in range(data["count"])])
         random.shuffle(bag)
         return bag
@@ -314,6 +316,8 @@ class EquadiumGame:
         Replenishes the player's hand up to max_rack_size using NORMAL tiles.
         Any '=' tiles they are holding are ignored during this calculation.
         """
+        if self.config.get("free_brackets"):
+            player.rack = [t for t in player.rack if t.symbol not in ("(", ")")]
         normal_tiles_in_rack = sum(1 for t in player.rack if t.symbol != "=")
         tiles_needed = self.config["max_rack_size"] - normal_tiles_in_rack
         
@@ -406,6 +410,12 @@ class EquadiumGame:
         return True
 
     def play_tiles(self, player, move):
+        if self.config.get("free_brackets"):
+            # "(" and ")" come from an unlimited pile, so a play can always use them
+            for _, _, t in move.tiles_to_play:
+                if t.symbol in ("(", ")") and sum(1 for x in player.rack if x.symbol == t.symbol) < \
+                        sum(1 for _, _, y in move.tiles_to_play if y.symbol == t.symbol):
+                    player.rack.append(make_tile(t.symbol, self.config))
         # 1. Check rack availability for normal and equals tiles
         rack_symbols = [t.symbol for t in player.rack]
         needed_symbols = [t.symbol for _, _, t in move.tiles_to_play]

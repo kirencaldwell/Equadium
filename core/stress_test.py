@@ -54,11 +54,15 @@ def _expected_symbol_counts(config: dict) -> Counter:
     counts = Counter({sym: d["count"] for sym, d in config["tiles"].items()})
     counts["x"] += 1  # the seed tile is created outside the bag
     counts["="] = config["equals_tile"]["count"]
+    if config.get("free_brackets"):
+        for b in ("(", ")"):
+            counts.pop(b, None)
     return counts
 
 
 def _all_symbol_counts(game) -> Counter:
     counts = Counter()
+    free = ("(", ")") if game.config.get("free_brackets") else ()
     for t in game.tile_bag:
         counts[t.symbol] += 1
     for t in game.equals_bag:
@@ -70,6 +74,8 @@ def _all_symbol_counts(game) -> Counter:
         for t in row:
             if t is not None:
                 counts[t.symbol] += 1
+    for sym in free:
+        counts.pop(sym, None)
     return counts
 
 

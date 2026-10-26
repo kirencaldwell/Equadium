@@ -516,6 +516,8 @@ class SearchAgent:
         bad_pairs = self._adjacency_blacklist(game)
 
         rack = Counter(t.symbol for t in player.rack)
+        if self.config.get("free_brackets"):
+            rack["("] = rack[")"] = 2           # a free pile; capped so the pool search stays small
         free_equals = player.equals_available and bool(game.equals_bag)
         if rack["="] == 0 and not free_equals:
             return None
@@ -777,8 +779,8 @@ class SearchAgent:
                 return None
             match = next((t for t in available if t.symbol == symbol), None)
             if match is None:
-                if symbol == "=":
-                    match = make_tile("=", self.config)
+                if symbol == "=" or (symbol in ("(", ")") and self.config.get("free_brackets")):
+                    match = make_tile(symbol, self.config)
                 else:
                     return None
             else:
