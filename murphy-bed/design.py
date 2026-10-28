@@ -41,7 +41,8 @@ BACK_T = 0.25
 TOWER_D = BED_D
 TOWER_W = (WALL_W - BED_W - 2 * SCRIBE) / 2      # bed centered => both equal
 LOWER_H = 36.0          # top of lower (doored) section
-KERF = 0.125
+KERF = 0.125            # user's saw blade is at least 1/8"; every cut in the layouts costs this much
+EDGE_TRIM = 0.125       # factory edge trimmed off one long edge and one end of every sheet
 SHEET_W, SHEET_L = 48.0, 96.0
 
 
@@ -145,7 +146,7 @@ def pack_once(items, remnants, order):
                 spot = (si, best[1])
                 break
         if spot is None:
-            sheets.append({'free': [(0, 0, SHEET_W, SHEET_L)], 'placed': [], 'remnant': False, 'w': SHEET_W, 'l': SHEET_L})
+            sheets.append({'free': [(0, 0, SHEET_W - EDGE_TRIM, SHEET_L - EDGE_TRIM)], 'placed': [], 'remnant': False, 'w': SHEET_W, 'l': SHEET_L})
             spot = (len(sheets) - 1, 0)
         s = sheets[spot[0]]
         rx, ry, rw, rh = s['free'].pop(spot[1])
@@ -170,6 +171,21 @@ def pack(items, remnants=()):
         if best is None or (new, waste) < best[0]:
             best = ((new, waste), res)
     return best[1]
+
+
+def check_layout(sheets):
+    """Assert every part is inside the trimmed sheet and every pair is >= KERF apart. Returns min slack."""
+    worst = 9e9
+    for s in sheets:
+        pl = s['placed']
+        for i, (_, x1, y1, w1, h1) in enumerate(pl):
+            assert x1 >= -1e-9 and y1 >= -1e-9
+            assert x1 + w1 <= s['w'] - EDGE_TRIM + 1e-9 and y1 + h1 <= s['l'] - EDGE_TRIM + 1e-9, 'part outside trimmed sheet'
+            for _, x2, y2, w2, h2 in pl[i + 1:]:
+                gap = max(x2 - (x1 + w1), x1 - (x2 + w2), y2 - (y1 + h1), y1 - (y2 + h2))
+                assert gap >= KERF - 1e-9, f'parts closer than kerf ({gap:.4f})'
+                worst = min(worst, gap)
+    return worst
 
 
 # ----------------------------------------------------------------------------
@@ -226,10 +242,9 @@ def write_scad(path):
 # ----------------------------------------------------------------------------
 def sheet_report(title, sheets):
     new = [s for s in sheets if not s['remnant']]
-    out = [f'**{title}: {len(new)} new sheet(s)**' + (' (plus bed-kit offcut)' if any(s['remnant'] for s in sheets) else ''), '']
+    out = [f'**{title}: {len(new)} sheet(s)**', '']
     for i, s in enumerate(sheets):
-        label = 'Bed-kit offcut' if s['remnant'] else f'Sheet {i + 1 - sum(1 for t in sheets[:i] if t["remnant"])}'
-        out.append(f'- {label}: ' + '; '.join(f'{n} {frac(w)}x{frac(h)}' for n, _, _, w, h in s['placed']))
+        out.append(f'- Sheet {i + 1}: ' + '; '.join(f'{n} {frac(w)}x{frac(h)}' for n, _, _, w, h in s['placed']))
     return out
 
 
@@ -244,13 +259,11 @@ def write_reports(outdir):
         wr.writerow(['group', 'part', 'material', 'qty', 'width (across grain)', 'length (along grain)', 'notes'])
         wr.writerows(rows)
 
-    tower_34 = [p for p in tower if p.mat == '3/4 ply']
-    tower_14 = [p for p in tower if p.mat == '1/4 ply']
-    # Offcut from bed-kit sheet 4 (plans p.5): 14-3/8" strip used, rest of the 48" width is free.
-    offcut = (SHEET_W - 14.375, SHEET_L)
-    s34 = pack(expand(tower_34), remnants=[offcut])
-    s14 = pack(expand(tower_14))
-    s34_fresh = pack(expand(tower_34))
+    sheet_parts = [p for p in bed + tower if p.mat != 'solid']
+    s34 = pack(expand([p for p in sheet_parts if p.mat == '3/4 ply']))
+    s14 = pack(expand([p for p in sheet_parts if p.mat == '1/4 ply']))
+    check_layout(s34)
+    check_layout(s14)
 
     md = []
     md.append('# Cut list\n')
@@ -265,14 +278,17 @@ def write_reports(outdir):
             md.append(f'| {p.name} | {p.mat} | {p.qty} | {frac(p.w)} | {frac(p.l)} | {p.note} |')
         md.append('')
     md.append('## Sheet goods\n')
-    md.append('Bed cabinet, per plans p.5: **4 sheets 3/4" ply + 2 sheets 1/4" ply** (4x8). Their cutting guide is used as-is.\n')
-    md += sheet_report('Towers 3/4" ply (using bed sheet-4 offcut)', s34) + ['']
-    md.append(f'Without using the offcut: {sum(1 for s in s34_fresh)} sheets.\n')
-    md += sheet_report('Towers 1/4" backs', s14) + ['']
+    md.append(f'All sheet parts (bed cabinet and towers) are packed together with a {frac(KERF)} kerf between every pair of parts '
+              f'and {frac(EDGE_TRIM)} trimmed off one long edge and one end of each sheet (grain along the 96" length, no rotation). '
+              'The bed-kit parts keep the exact sizes from the plans; only their positions on the sheet differ from the plans\' cutting guide, '
+              'because that guide leaves only 1/8" of slack (15-7/8" + 32" on a 48" sheet) and fails once edge trim is allowed for.\n')
+    md += sheet_report('3/4" plywood', s34) + ['']
+    md += sheet_report('1/4" plywood', s14) + ['']
     new34 = sum(1 for s in s34 if not s['remnant'])
     new14 = sum(1 for s in s14 if not s['remnant'])
-    md.append(f'**Order total: {4 + new34} sheets 3/4" ply, {2 + new14} sheets 1/4" ply** '
-              f'(+ 1 spare 3/4" recommended for mistakes).\n')
+    md.append(f'**Order total: {new34} sheets 3/4" ply, {new14} sheets 1/4" ply** (4x8). '
+              'Add one spare 3/4" sheet for mistakes. Plans call for 4 + 2 for the bed alone, so the towers add '
+              f'{new34 - 4} + {new14 - 2}.\n')
     md.append('## Trim\n')
     md += [f'- {a}: {b}' for a, b in trim_list()]
     md.append('')
@@ -432,13 +448,13 @@ def draw_all(outdir, s34, s14):
             ax.add_patch(Rectangle((0, 0), s['w'], s['l'], fc='#f6f1e6', ec='k'))
             for name, x, y, w, h in s['placed']:
                 ax.add_patch(Rectangle((x, y), w, h, fc='#d8c29a', ec='k'))
-                ax.text(x + w / 2, y + h / 2, f'{name.replace("Tower ", "").split(" (")[0]}\n{frac(w)} x {frac(h)}', ha='center', va='center', fontsize=6, rotation=90 if w < 20 and h > 40 else 0)
+                ax.text(x + w / 2, y + h / 2, f'{name.replace("Tower ", "T ").split(" (")[0]}\n{frac(w)} x {frac(h)}', ha='center', va='center', fontsize=6, rotation=90 if w < 20 and h > 40 else 0)
             ax.set_xlim(-2, SHEET_W + 2)
             ax.set_ylim(-2, SHEET_L + 2)
             ax.set_aspect('equal')
-            ax.set_title('Bed-kit offcut' if s['remnant'] else 'New sheet', fontsize=9)
+            ax.set_title('Sheet %d' % (sheets.index(s) + 1), fontsize=9)
             ax.axis('off')
-        fig.suptitle(f'Shelf-tower {tag.replace("-", "/")}" plywood layout (grain runs vertical)')
+        fig.suptitle(f'{tag.replace("-", "/")}" plywood layouts, bed cabinet + towers (grain runs vertical)')
         fig.savefig(os.path.join(outdir, f'sheets_{tag}.png'), dpi=110, bbox_inches='tight')
         plt.close(fig)
 

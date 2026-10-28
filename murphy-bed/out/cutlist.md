@@ -36,23 +36,26 @@ Centered layout on an 11 ft wall: towers 32-5/16" wide each, bed cabinet 65-7/8"
 
 ## Sheet goods
 
-Bed cabinet, per plans p.5: **4 sheets 3/4" ply + 2 sheets 1/4" ply** (4x8). Their cutting guide is used as-is.
+All sheet parts (bed cabinet and towers) are packed together with a 1/8" kerf between every pair of parts and 1/8" trimmed off one long edge and one end of each sheet (grain along the 96" length, no rotation). The bed-kit parts keep the exact sizes from the plans; only their positions on the sheet differ from the plans' cutting guide, because that guide leaves only 1/8" of slack (15-7/8" + 32" on a 48" sheet) and fails once edge trim is allowed for.
 
-**Towers 3/4" ply (using bed sheet-4 offcut): 3 new sheet(s)** (plus bed-kit offcut)
+**3/4" plywood: 7 sheet(s)**
 
-- Bed-kit offcut: Tower side 15-5/8"x87-1/8"; Tower side 15-5/8"x87-1/8"
-- Sheet 1: Tower side 15-5/8"x87-1/8"; Tower side 15-5/8"x87-1/8"; Scribe strip (rip to fit walls) 3"x87-1/8"; Scribe strip (rip to fit walls) 3"x87-1/8"
-- Sheet 2: Tower door (full overlay) 16"x31-7/8"; Tower door (full overlay) 16"x31-7/8"; Tower door (full overlay) 16"x31-7/8"; Tower door (full overlay) 16"x31-7/8"; Tower top 15-5/8"x30-13/16"; Tower top 15-5/8"x30-13/16"; Tower bottom (at base-molding height) 15-5/8"x30-13/16"; Tower bottom (at base-molding height) 15-5/8"x30-13/16"; Tower fixed divider (lower/upper) 15-5/8"x30-13/16"
-- Sheet 3: Tower fixed divider (lower/upper) 15-5/8"x30-13/16"; Tower adjustable shelf 15"x30-9/16"; Tower adjustable shelf 15"x30-9/16"; Tower adjustable shelf 15"x30-9/16"; Tower adjustable shelf 15"x30-9/16"; Tower adjustable shelf 15"x30-9/16"; Tower adjustable shelf 15"x30-9/16"
+- Sheet 1: G Cabinet vertical 15-7/8"x87-1/8"; G Cabinet vertical 15-7/8"x87-1/8"; Tower side 15-5/8"x87-1/8"
+- Sheet 2: Tower side 15-5/8"x87-1/8"; Tower side 15-5/8"x87-1/8"; Tower side 15-5/8"x87-1/8"
+- Sheet 3: Scribe strip (rip to fit walls) 3"x87-1/8"; Scribe strip (rip to fit walls) 3"x87-1/8"; E Bed face panel 32"x81-3/4"; B Side rail 5-7/8"x81-1/2"; H Header front rail 2-3/4"x64-3/8"
+- Sheet 4: E Bed face panel 32"x81-3/4"; B Side rail 5-7/8"x81-1/2"; H Header rear rail 2-3/4"x64-3/8"; D Head rail 5-7/8"x62"
+- Sheet 5: F Headboard 15-7/8"x64-3/8"; H Header board 14-3/8"x64-3/8"; C Foot rail 3"x62"; Tower top 15-5/8"x30-13/16"; Tower top 15-5/8"x30-13/16"; Tower bottom (at base-molding height) 15-5/8"x30-13/16"
+- Sheet 6: Tower door (full overlay) 16"x31-7/8"; Tower door (full overlay) 16"x31-7/8"; Tower door (full overlay) 16"x31-7/8"; Tower door (full overlay) 16"x31-7/8"; Tower bottom (at base-molding height) 15-5/8"x30-13/16"; Tower fixed divider (lower/upper) 15-5/8"x30-13/16"; Tower fixed divider (lower/upper) 15-5/8"x30-13/16"; Tower adjustable shelf 15"x30-9/16"; Tower adjustable shelf 15"x30-9/16"
+- Sheet 7: Tower adjustable shelf 15"x30-9/16"; Tower adjustable shelf 15"x30-9/16"; Tower adjustable shelf 15"x30-9/16"; Tower adjustable shelf 15"x30-9/16"
 
-Without using the offcut: 4 sheets.
-
-**Towers 1/4" backs: 2 new sheet(s)**
+**1/4" plywood: 4 sheet(s)**
 
 - Sheet 1: Tower back 32-5/16"x87-1/8"
 - Sheet 2: Tower back 32-5/16"x87-1/8"
+- Sheet 3: J Mattress support 31"x80"
+- Sheet 4: J Mattress support 31"x80"
 
-**Order total: 7 sheets 3/4" ply, 4 sheets 1/4" ply** (+ 1 spare 3/4" recommended for mistakes).
+**Order total: 7 sheets 3/4" ply, 4 sheets 1/4" ply** (4x8). Add one spare 3/4" sheet for mistakes. Plans call for 4 + 2 for the bed alone, so the towers add 3 + 2.
 
 ## Trim
 
