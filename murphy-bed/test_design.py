@@ -247,7 +247,7 @@ class ReportsAndDrawings(unittest.TestCase):
             d.write_scad(os.path.join(t, 'model.scad'))
             d.draw_all(t, s34, s14)
             for f in ('cutlist.md', 'cutlist.csv', 'model.scad', 'front_elevation.png', 'plan.png',
-                      'side_section.png', 'iso.png', 'sheets_3-4.png', 'sheets_1-4.png'):
+                      'side_section.png', 'iso.png', 'sheets_3-4.png', 'sheets_1-4.png', 'trim_guide.md'):
                 self.assertGreater(os.path.getsize(os.path.join(t, f)), 500, f)
             with open(os.path.join(t, 'cutlist.md')) as f:
                 md = f.read()

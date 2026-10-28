@@ -59,10 +59,10 @@ All sheet parts (bed cabinet and towers) are packed together with a 1/8" kerf be
 
 ## Trim
 
-- Crown moulding, front run: 11.0 ft (132") + mitre waste
-- Crown moulding, end returns: 2 x 19-3/8" (return to each end wall)
-- Base moulding, front run: 11.0 ft (132") + mitre waste; stock at least 5-1/4" tall, scribed to the floor (top edge level)
-- Base moulding, end returns: 2 x 16-5/8"
+- Crown moulding, front run: one 12 ft length (front run is 132", wall to wall, so no splice); square ends scribed to the side walls
+- Crown moulding, end returns: none: the unit runs wall to wall. Only needed if you leave an end exposed (see trim_guide.md)
+- Crown backer blocks: 3/4" ply, 3-1/2" x 3-1/2" triangles (45-degree spring angle), one every 16" = ~10 blocks
+- Base moulding, front run: 11.0 ft (132"), one 12 ft length of stock at least 5-1/4" tall, scribed to the floor (top edge level); butts into the side-wall baseboards
 - Edge banding: 13/16" iron-on, ~80 ft for bed (plans) + ~65 ft for towers/shelves
 
 ## Hardware (not in the kit)

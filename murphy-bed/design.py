@@ -28,6 +28,8 @@ EXIST_CROWN_PROJ = 3.5  # ... and how far it sticks out (ASSUMED)
 NEW_CROWN_H = 3.5       # new crown, same style as existing (ASSUMED)
 NEW_CROWN_PROJ = 3.5
 BASE_H = 4.0            # new base molding / toe-kick height (ASSUMED)
+EXIST_BASE_H = 4.5      # existing room baseboard (ASSUMED)
+EXIST_BASE_T = 0.5
 SCRIBE = 0.75           # fitting gap left at each wall end
 FLOOR_DROP = 1.0        # floor falls this much across the 132" wall (ASSUMED; measure it)
 
@@ -117,12 +119,11 @@ def tower_parts():
 
 def trim_list():
     run = WALL_W
-    ret = BED_D + NEW_CROWN_PROJ - 0.0
     return [
-        ('Crown moulding, front run', f'{WALL_W / 12:.1f} ft ({frac(run)}) + mitre waste'),
-        ('Crown moulding, end returns', f'2 x {frac(ret)} (return to each end wall)'),
-        ('Base moulding, front run', f'{WALL_W / 12:.1f} ft ({frac(run)}) + mitre waste; stock at least {frac(BASE_H + FLOOR_DROP + 0.25)} tall, scribed to the floor (top edge level)'),
-        ('Base moulding, end returns', f'2 x {frac(BED_D + 0.75)}'),
+        ('Crown moulding, front run', f'one 12 ft length (front run is {frac(run)}, wall to wall, so no splice); square ends scribed to the side walls'),
+        ('Crown moulding, end returns', 'none: the unit runs wall to wall. Only needed if you leave an end exposed (see trim_guide.md)'),
+        ('Crown backer blocks', f'3/4" ply, {frac(NEW_CROWN_H)} x {frac(NEW_CROWN_PROJ)} triangles (45-degree spring angle), one every 16" = ~{math.ceil(run / 16) + 1} blocks'),
+        ('Base moulding, front run', f'{WALL_W / 12:.1f} ft ({frac(run)}), one 12 ft length of stock at least {frac(BASE_H + FLOOR_DROP + 0.25)} tall, scribed to the floor (top edge level); butts into the side-wall baseboards'),
         ('Edge banding', '13/16" iron-on, ~80 ft for bed (plans) + ~65 ft for towers/shelves'),
     ]
 
@@ -255,6 +256,73 @@ def sheet_report(title, sheets):
     return out
 
 
+def write_trim_guide(outdir):
+    notch_h, notch_d = EXIST_BASE_H + 0.125, EXIST_BASE_T + 0.125
+    g = f"""# Trim guide
+
+All trim values come from the parameters in `design.py`; the ones marked (assumed) need your measurements.
+The Create-A-Bed plans only show trim as *options* (p.3) and give two instructions: notch the cabinet
+verticals for existing baseboard (assembly booklet p.8, step 14) and apply base moulding across the front
+after the bed is closed (p.11, step 20). Everything else below is our design, not the maker's.
+
+## 1. Crown moulding (front run, {frac(NEW_CROWN_H)} tall x {frac(NEW_CROWN_PROJ)} projection, assumed)
+
+- **Match the room.** Use the same profile as the existing crown. Take a 6" offcut or a photo with a profile
+  gauge from a hidden spot (closet, behind a door) to your supplier. The assumed size is a 45-degree spring
+  angle crown, which has equal height and projection.
+- **Stock.** One 12 ft piece. The front run is {frac(WALL_W)} wall to wall, so there is no splice.
+- **Backer blocks.** Cut 3/4" ply triangles with legs of {frac(NEW_CROWN_H)} x {frac(NEW_CROWN_PROJ)} (45-degree hypotenuse).
+  Screw them to the tops of the towers and the bed header front rail about every 16" (about {math.ceil(WALL_W / 16) + 1}).
+  Nail the crown to them. Do not hang the crown from the bed header alone, and do not add weight to the bed itself.
+- **Cutting the ends.** No mitres are needed for a straight wall-to-wall run. Cut one end 1/16" long, hold it
+  against the first side wall, mark the wall's angle, and trim to fit. Then do the other end the same way, a hair
+  long first. Check with a test-fit before nailing. Walls are rarely square, so scribe each end.
+- **If you leave an end exposed** (a return back to the wall): cut the crown upside down and backwards on the
+  mitre saw, resting against the fence at its spring angle. For a 90-degree outside corner use mitre 35.3 degrees /
+  bevel 30 degrees on a 45-degree spring crown, or mitre 31.6 / bevel 33.9 on a 38-degree one. Cut a scrap first.
+- **Clearance.** New crown top is {frac(BED_H + NEW_CROWN_H)}; existing crown starts at {frac(CEIL_H - EXIST_CROWN_H)}.
+  With the assumed {frac(FLOOR_DROP)} floor drop the gap is {frac(CEIL_H - EXIST_CROWN_H - BED_H - NEW_CROWN_H - FLOOR_DROP)}.
+  Do the dry fit before cutting the crown.
+
+## 2. Base moulding (front run)
+
+- **Stock.** At least {frac(BASE_H + FLOOR_DROP + 0.25)} tall: {frac(BASE_H)} showing at the high point plus {frac(FLOOR_DROP)} for the
+  assumed floor drop and 1/4" extra. A 1x6 ripped to size works.
+- **Scribing to the floor.** Set the cabinet level first. Mark the base's top line level at {frac(BASE_H)} above the shim
+  height. Set a compass (or a block and pencil) to the largest floor gap, trace the floor onto the board, cut to the line with a
+  jigsaw or block plane, and back-bevel the cut about 5 degrees so the bottom edge meets the floor tight.
+- **Cutting the ends.** Square ends that butt into the existing baseboards on the side walls, scribed like the crown.
+- **Fastening.** Glue and finish-nail it to the front edges of the tower bottoms. Do not nail it to the bed's face panel.
+- **Bed clearance.** The face panel bottom sits about {frac(FACE_PANEL_BOTTOM)} above the floor, so the base must stand in front of it
+  (the kit's p.21 drawing). Confirm with Create-A-Bed before you rely on that.
+
+## 3. Baseboard notches (kit step 14, extended to the towers)
+
+If you keep the existing baseboard (assumed {frac(EXIST_BASE_H)} tall x {frac(EXIST_BASE_T)} thick), notch the rear bottom of each bed
+vertical **and** each tower side: **{frac(notch_h)} tall x {frac(notch_d)} deep**. For the 1/4" tower backs, cut the bottom edge
+{frac(notch_h)} short instead. Simplest alternative: remove the baseboard behind the unit and patch it later.
+
+## 4. Edge banding (the "F" edges)
+
+- Use 13/16" iron-on veneer: bed face panels (long edges), cabinet verticals (front edges), header rails, tower fronts, shelf fronts.
+- Iron slowly at medium-high heat, press with a block, trim the overhang with a banding trimmer or sharp chisel,
+  and lightly sand the edge flush. Do the end grain first, then the long edges.
+
+## 5. Face-panel moulding (optional, kit p.3)
+
+The kit's "full-length" and "split" panel mouldings add weight to the face panel. The gas springs are balanced for
+the plain panel, so call Create-A-Bed (1-877-966-3852) before adding any.
+
+## 6. Order of work
+
+1. Remove or notch the baseboard. 2. Set the bed cabinet level and plumb on shims and anchor it into studs.
+3. Set the towers to its height and tie them to the cabinet and wall. 4. Fit and scribe the scribe strips to the side walls.
+5. Fit the crown (dry fit first), then the base moulding. 6. Caulk, fill, and paint.
+"""
+    with open(os.path.join(outdir, 'trim_guide.md'), 'w') as f:
+        f.write(g)
+
+
 def write_reports(outdir):
     bed, tower = bed_parts(), tower_parts()
     rows = []
@@ -317,6 +385,7 @@ def write_reports(outdir):
            f'- Room is deep enough: open bed projects {frac(BED_OPEN_PROJ)} from the wall, so need > {frac(BED_OPEN_PROJ + 24)} for walking clearance (window-wall length not yet given)']
     with open(os.path.join(outdir, 'cutlist.md'), 'w') as f:
         f.write('\n'.join(md) + '\n')
+    write_trim_guide(outdir)
     return s34, s14
 
 
