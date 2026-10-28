@@ -58,7 +58,7 @@ Without using the offcut: 4 sheets.
 
 - Crown moulding, front run: 11.0 ft (132") + mitre waste
 - Crown moulding, end returns: 2 x 19-3/8" (return to each end wall)
-- Base moulding, front run: 11.0 ft (132") + mitre waste
+- Base moulding, front run: 11.0 ft (132") + mitre waste; stock at least 5-1/4" tall, scribed to the floor (top edge level)
 - Base moulding, end returns: 2 x 16-5/8"
 - Edge banding: 13/16" iron-on, ~80 ft for bed (plans) + ~65 ft for towers/shelves
 
@@ -72,10 +72,12 @@ Without using the offcut: 4 sheets.
 
 ## Assumptions to verify
 
-- Ceiling 96" and level; floor level
+- Ceiling 96", measured from the HIGH point of the floor (floor is NOT level)
 - Existing crown 3-1/2" tall x 3-1/2" proud; new crown 3-1/2" tall (matches style, not measured)
-- Gap between new crown top (90-5/8") and bottom of existing crown (92-1/2") is 1-7/8": add a frieze board or taller crown to close it
-- Base moulding 4" tall; check it stays below the bed face panel
+- Gap between new crown top (90-5/8") and bottom of existing crown (92-1/2") is 1-7/8" on a level floor. With a 1" floor drop the unit is set level from the HIGH end of the floor, so the gap shrinks to 7/8". Ceiling must be measured from the high point of the floor.
+- Floor not level (assumed 1" across the wall): level and plumb the bed cabinet FIRST on shims at the high point, set the towers to match its top, then scribe the base moulding to the floor. Shims go behind the base moulding. The bed cabinet must be plumb or the face-panel gap will be uneven (plans, assembly p.11 steps 19-20).
+- Open bed: the kit legs are fixed tubes, so on a floor that falls up to 1" one leg may hang off the floor. Check the leg ends for adjusters, plan on adjustable glides or a shim, and ask Create-A-Bed.
+- Base moulding 4" tall at the high point (5" at the low end after scribing); check the bed face panel clears it
 - Bed wall is flat and has studs at usable spacing; the kit requires wood/metal-stud/masonry anchoring (plans p.10)
 - Window starts 30" from the bed wall: tower depth 15-7/8" leaves 14-1/8" to the window edge (trim not included)
 - Room is deep enough: open bed projects 87" from the wall, so need > 111" for walking clearance (window-wall length not yet given)

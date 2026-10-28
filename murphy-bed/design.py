@@ -29,6 +29,7 @@ NEW_CROWN_H = 3.5       # new crown, same style as existing (ASSUMED)
 NEW_CROWN_PROJ = 3.5
 BASE_H = 4.0            # new base molding / toe-kick height (ASSUMED)
 SCRIBE = 0.75           # fitting gap left at each wall end
+FLOOR_DROP = 1.0        # floor falls this much across the 132" wall (ASSUMED; measure it)
 
 # Create-A-Bed queen vertical (plans p.2 and p.6)
 BED_W, BED_H, BED_D = 65.875, 87.125, 15.875
@@ -112,7 +113,7 @@ def trim_list():
     return [
         ('Crown moulding, front run', f'{WALL_W / 12:.1f} ft ({frac(run)}) + mitre waste'),
         ('Crown moulding, end returns', f'2 x {frac(ret)} (return to each end wall)'),
-        ('Base moulding, front run', f'{WALL_W / 12:.1f} ft ({frac(run)}) + mitre waste'),
+        ('Base moulding, front run', f'{WALL_W / 12:.1f} ft ({frac(run)}) + mitre waste; stock at least {frac(BASE_H + FLOOR_DROP + 0.25)} tall, scribed to the floor (top edge level)'),
         ('Base moulding, end returns', f'2 x {frac(BED_D + 0.75)}'),
         ('Edge banding', '13/16" iron-on, ~80 ft for bed (plans) + ~65 ft for towers/shelves'),
     ]
@@ -282,10 +283,12 @@ def write_reports(outdir):
            '- Tower-to-wall anchors: 2 cleats or 4 screws per tower; tower-to-bed-cabinet clamp screws through the adjoining sides',
            '- #8 x 1-1/4" and 1-1/2" screws, glue, 1-1/2" finish nails (per kit BOM)']
     md.append('\n## Assumptions to verify\n')
-    md += [f'- Ceiling {frac(CEIL_H)} and level; floor level',
+    md += [f'- Ceiling {frac(CEIL_H)}, measured from the HIGH point of the floor (floor is NOT level)',
            f'- Existing crown {frac(EXIST_CROWN_H)} tall x {frac(EXIST_CROWN_PROJ)} proud; new crown {frac(NEW_CROWN_H)} tall (matches style, not measured)',
-           f'- Gap between new crown top ({frac(BED_H + NEW_CROWN_H)}) and bottom of existing crown ({frac(CEIL_H - EXIST_CROWN_H)}) is {frac(CEIL_H - EXIST_CROWN_H - BED_H - NEW_CROWN_H)}: add a frieze board or taller crown to close it',
-           f'- Base moulding {frac(BASE_H)} tall; check it stays below the bed face panel',
+           f'- Gap between new crown top ({frac(BED_H + NEW_CROWN_H)}) and bottom of existing crown ({frac(CEIL_H - EXIST_CROWN_H)}) is {frac(CEIL_H - EXIST_CROWN_H - BED_H - NEW_CROWN_H)} on a level floor. With a {frac(FLOOR_DROP)} floor drop the unit is set level from the HIGH end of the floor, so the gap shrinks to {frac(CEIL_H - EXIST_CROWN_H - BED_H - NEW_CROWN_H - FLOOR_DROP)}. Ceiling must be measured from the high point of the floor.',
+           f'- Floor not level (assumed {frac(FLOOR_DROP)} across the wall): level and plumb the bed cabinet FIRST on shims at the high point, set the towers to match its top, then scribe the base moulding to the floor. Shims go behind the base moulding. The bed cabinet must be plumb or the face-panel gap will be uneven (plans, assembly p.11 steps 19-20).',
+           f'- Open bed: the kit legs are fixed tubes, so on a floor that falls up to {frac(FLOOR_DROP)} one leg may hang off the floor. Check the leg ends for adjusters, plan on adjustable glides or a shim, and ask Create-A-Bed.',
+           f'- Base moulding {frac(BASE_H)} tall at the high point ({frac(BASE_H + FLOOR_DROP)} at the low end after scribing); check the bed face panel clears it',
            '- Bed wall is flat and has studs at usable spacing; the kit requires wood/metal-stud/masonry anchoring (plans p.10)',
            f'- Window starts {frac(WINDOW_FROM_WALL)} from the bed wall: tower depth {frac(TOWER_D)} leaves {frac(WINDOW_FROM_WALL - TOWER_D)} to the window edge (trim not included)',
            f'- Room is deep enough: open bed projects {frac(BED_OPEN_PROJ)} from the wall, so need > {frac(BED_OPEN_PROJ + 24)} for walking clearance (window-wall length not yet given)']
@@ -328,21 +331,24 @@ def draw_all(outdir, s34, s14):
     ax.plot([xb + BED_W / 2] * 2, [4, 85.75], 'k', lw=1)
     for hx in (xb + BED_W / 2 - 3, xb + BED_W / 2 + 3):
         ax.plot([hx] * 2, [62, 70], 'k', lw=2.5)
+    ax.fill([0, WALL_W, WALL_W], [0, 0, -FLOOR_DROP], color='#c33', alpha=0.5)
+    ax.plot([0, WALL_W], [0, -FLOOR_DROP], color='#c33', lw=1.5)
+    ax.text(WALL_W / 2, -FLOOR_DROP - 4, f'floor falls {frac(FLOOR_DROP)} (assumed): unit set level at high end, base moulding scribed', ha='center', fontsize=7, color='#c33')
     ax.add_patch(Rectangle((xl, 0), WALL_W - 2 * SCRIBE, BASE_H, fc=COLORS['trim'], ec='k'))
     ax.add_patch(Rectangle((xl, BED_H), WALL_W - 2 * SCRIBE, NEW_CROWN_H, fc=COLORS['trim'], ec='k'))
     ax.text(xl + TOWER_W / 2, 60, 'open shelves\n(3 adjustable)', ha='center', fontsize=9)
     ax.text(xl + TOWER_W / 2, 20, 'doors', ha='center', fontsize=9)
     ax.text(xb + BED_W / 2, 40, 'MURPHY BED\n(Create-A-Bed queen vertical)', ha='center', fontsize=10)
-    ax.annotate('', (xl, -6), (xb, -6), arrowprops=dict(arrowstyle='<->'))
-    ax.text((xl + xb) / 2, -10, frac(TOWER_W), ha='center', fontsize=9)
-    ax.annotate('', (xb, -6), (xr, -6), arrowprops=dict(arrowstyle='<->'))
-    ax.text((xb + xr) / 2, -10, frac(BED_W), ha='center', fontsize=9)
-    ax.annotate('', (xr, -6), (xr + TOWER_W, -6), arrowprops=dict(arrowstyle='<->'))
-    ax.text(xr + TOWER_W / 2, -10, frac(TOWER_W), ha='center', fontsize=9)
+    ax.annotate('', (xl, -12), (xb, -12), arrowprops=dict(arrowstyle='<->'))
+    ax.text((xl + xb) / 2, -16, frac(TOWER_W), ha='center', fontsize=9)
+    ax.annotate('', (xb, -12), (xr, -12), arrowprops=dict(arrowstyle='<->'))
+    ax.text((xb + xr) / 2, -16, frac(BED_W), ha='center', fontsize=9)
+    ax.annotate('', (xr, -12), (xr + TOWER_W, -12), arrowprops=dict(arrowstyle='<->'))
+    ax.text(xr + TOWER_W / 2, -16, frac(TOWER_W), ha='center', fontsize=9)
     ax.text(WALL_W + 2, BED_H / 2, f'{frac(BED_H)}', rotation=90, va='center', fontsize=9)
     ax.text(WALL_W + 2, CEIL_H - EXIST_CROWN_H / 2, 'existing crown', va='center', fontsize=7)
     ax.set_xlim(-8, WALL_W + 10)
-    ax.set_ylim(-16, CEIL_H + 4)
+    ax.set_ylim(-22, CEIL_H + 4)
     ax.set_aspect('equal')
     ax.set_title('Front elevation - bed wall (window wall at left, x = 0)')
     ax.axis('off')
