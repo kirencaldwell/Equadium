@@ -40,6 +40,13 @@ T = 0.75                # plywood thickness
 BACK_T = 0.25
 TOWER_D = BED_D
 TOWER_W = (WALL_W - BED_W - 2 * SCRIBE) / 2      # bed centered => both equal
+CARCASS_D = TOWER_D - T                          # overlay doors add T, so door faces sit flush with the bed cabinet front
+SIDE_D = CARCASS_D - BACK_T                      # sides/fixed panels sit in front of the applied 1/4" back
+SHELF_D = SIDE_D - 0.25
+STUD_OC = 16.0          # wall stud spacing (ASSUMED; the kit needs 4 anchor points in the header rail)
+FACE_PANEL_H = 81.75    # plans p.6 part E
+HEADER_FRONT_RAIL = 2.75  # plans p.6 part H front rail covers the top of the opening
+FACE_PANEL_BOTTOM = BED_H - HEADER_FRONT_RAIL - FACE_PANEL_H   # ~2-5/8" above the floor
 LOWER_H = 36.0          # top of lower (doored) section
 KERF = 0.125            # user's saw blade is at least 1/8"; every cut in the layouts costs this much
 EDGE_TRIM = 0.125       # factory edge trimmed off one long edge and one end of every sheet
@@ -92,7 +99,7 @@ def bed_parts():
 def tower_parts():
     n = 2                                   # two identical towers (bed centered)
     inner = TOWER_W - 2 * T
-    side_d = TOWER_D - BACK_T               # back panel applied over rear edges
+    side_d = SIDE_D                         # back panel applied over rear edges; doors flush to bed front
     door_w = TOWER_W / 2 - 0.125
     door_h = LOWER_H - BASE_H - 0.125
     return [
@@ -100,7 +107,7 @@ def tower_parts():
         Part('Tower top', 'tower', '3/4 ply', n, side_d, inner),
         Part('Tower bottom (at base-molding height)', 'tower', '3/4 ply', n, side_d, inner),
         Part('Tower fixed divider (lower/upper)', 'tower', '3/4 ply', n, side_d, inner),
-        Part('Tower adjustable shelf', 'tower', '3/4 ply', 3 * n, side_d - 0.625, inner - 0.25,
+        Part('Tower adjustable shelf', 'tower', '3/4 ply', 3 * n, SHELF_D, inner - 0.25,
              'band front edge; 5 mm shelf-pin holes'),
         Part('Tower door (full overlay)', 'tower', '3/4 ply', 2 * n, door_w, door_h),
         Part('Tower back', 'tower', '1/4 ply', n, TOWER_W, BED_H),
@@ -200,20 +207,20 @@ def boxes():
     # bed cabinet
     b.append(('bed vertical L', 'bed', x_bed, 0, 0, T, BED_D, BED_H))
     b.append(('bed vertical R', 'bed', x_right - T, 0, 0, T, BED_D, BED_H))
-    b.append(('bed header', 'bed', x_bed + T, 0, BED_H - 5.375, BED_W - 2 * T, BED_D, 5.375))
-    b.append(('bed face (closed)', 'bed', x_bed + T + 0.5, BED_D - 0.75 - 0.125, 4.0, BED_W - 2 * T - 1.0, 0.75, 81.75))
-    b.append(('bed frame (closed)', 'bedin', x_bed + T + 0.75, BED_D - 0.875 - 6.0, 4.0, BED_W - 2 * T - 1.5, 6.0, 81.0))
+    b.append(('bed header', 'bed', x_bed + T, 0, BED_H - HEADER_FRONT_RAIL, BED_W - 2 * T, BED_D, HEADER_FRONT_RAIL))
+    b.append(('bed face (closed)', 'bed', x_bed + T + 0.5, BED_D - 0.75 - 0.125, FACE_PANEL_BOTTOM, BED_W - 2 * T - 1.0, 0.75, FACE_PANEL_H))
+    b.append(('bed frame (closed)', 'bedin', x_bed + T + 0.75, BED_D - 0.875 - 6.0, FACE_PANEL_BOTTOM, BED_W - 2 * T - 1.5, 6.0, FACE_PANEL_H - 0.75))
     for nm, x0 in (('L', x_left), ('R', x_right)):
-        b.append((f'tower side out {nm}', 'tower', x0, 0, 0, T, TOWER_D, BED_H))
-        b.append((f'tower side in {nm}', 'tower', x0 + tw - T, 0, 0, T, TOWER_D, BED_H))
+        b.append((f'tower side out {nm}', 'tower', x0, BACK_T, 0, T, SIDE_D, BED_H))
+        b.append((f'tower side in {nm}', 'tower', x0 + tw - T, BACK_T, 0, T, SIDE_D, BED_H))
         b.append((f'tower back {nm}', 'tower', x0, 0, 0, tw, BACK_T, BED_H))
         for z in (BASE_H, LOWER_H - T, BED_H - T):
-            b.append((f'tower fixed {nm} z{z}', 'tower', x0 + T, BACK_T, z, tw - 2 * T, TOWER_D - BACK_T - 0.75, T))
+            b.append((f'tower fixed {nm} z{z}', 'tower', x0 + T, BACK_T, z, tw - 2 * T, SIDE_D, T))
         up_lo, up_hi = LOWER_H, BED_H - T
         gap = (up_hi - up_lo - 3 * T) / 4
         for k in range(1, 4):
             z = up_lo + k * gap + (k - 1) * T
-            b.append((f'tower shelf {nm} {k}', 'shelf', x0 + T + 0.125, BACK_T, z, tw - 2 * T - 0.25, TOWER_D - BACK_T - 0.75 - 0.625, T))
+            b.append((f'tower shelf {nm} {k}', 'shelf', x0 + T + 0.125, BACK_T, z, tw - 2 * T - 0.25, SHELF_D, T))
         dw = tw / 2 - 0.125
         for j in range(2):
             b.append((f'door {nm}{j}', 'door', x0 + 0.0625 + j * (dw + 0.125), TOWER_D - T, BASE_H, dw, T, LOWER_H - BASE_H - 0.125))

@@ -25,11 +25,11 @@ Centered layout on an 11 ft wall: towers 32-5/16" wide each, bed cabinet 65-7/8"
 
 | Part | Material | Qty | Width | Length | Notes |
 |---|---|---|---|---|---|
-| Tower side | 3/4 ply | 4 | 15-5/8" | 87-1/8" | notch rear bottom for baseboard |
-| Tower top | 3/4 ply | 2 | 15-5/8" | 30-13/16" |  |
-| Tower bottom (at base-molding height) | 3/4 ply | 2 | 15-5/8" | 30-13/16" |  |
-| Tower fixed divider (lower/upper) | 3/4 ply | 2 | 15-5/8" | 30-13/16" |  |
-| Tower adjustable shelf | 3/4 ply | 6 | 15" | 30-9/16" | band front edge; 5 mm shelf-pin holes |
+| Tower side | 3/4 ply | 4 | 14-7/8" | 87-1/8" | notch rear bottom for baseboard |
+| Tower top | 3/4 ply | 2 | 14-7/8" | 30-13/16" |  |
+| Tower bottom (at base-molding height) | 3/4 ply | 2 | 14-7/8" | 30-13/16" |  |
+| Tower fixed divider (lower/upper) | 3/4 ply | 2 | 14-7/8" | 30-13/16" |  |
+| Tower adjustable shelf | 3/4 ply | 6 | 14-5/8" | 30-9/16" | band front edge; 5 mm shelf-pin holes |
 | Tower door (full overlay) | 3/4 ply | 4 | 16" | 31-7/8" |  |
 | Tower back | 1/4 ply | 2 | 32-5/16" | 87-1/8" |  |
 | Scribe strip (rip to fit walls) | 3/4 ply | 2 | 3" | 87-1/8" | face-attached to outer tower sides |
@@ -40,13 +40,13 @@ All sheet parts (bed cabinet and towers) are packed together with a 1/8" kerf be
 
 **3/4" plywood: 7 sheet(s)**
 
-- Sheet 1: G Cabinet vertical 15-7/8"x87-1/8"; G Cabinet vertical 15-7/8"x87-1/8"; Tower side 15-5/8"x87-1/8"
-- Sheet 2: Tower side 15-5/8"x87-1/8"; Tower side 15-5/8"x87-1/8"; Tower side 15-5/8"x87-1/8"
-- Sheet 3: Scribe strip (rip to fit walls) 3"x87-1/8"; Scribe strip (rip to fit walls) 3"x87-1/8"; E Bed face panel 32"x81-3/4"; B Side rail 5-7/8"x81-1/2"; H Header front rail 2-3/4"x64-3/8"
-- Sheet 4: E Bed face panel 32"x81-3/4"; B Side rail 5-7/8"x81-1/2"; H Header rear rail 2-3/4"x64-3/8"; D Head rail 5-7/8"x62"
-- Sheet 5: F Headboard 15-7/8"x64-3/8"; H Header board 14-3/8"x64-3/8"; C Foot rail 3"x62"; Tower top 15-5/8"x30-13/16"; Tower top 15-5/8"x30-13/16"; Tower bottom (at base-molding height) 15-5/8"x30-13/16"
-- Sheet 6: Tower door (full overlay) 16"x31-7/8"; Tower door (full overlay) 16"x31-7/8"; Tower door (full overlay) 16"x31-7/8"; Tower door (full overlay) 16"x31-7/8"; Tower bottom (at base-molding height) 15-5/8"x30-13/16"; Tower fixed divider (lower/upper) 15-5/8"x30-13/16"; Tower fixed divider (lower/upper) 15-5/8"x30-13/16"; Tower adjustable shelf 15"x30-9/16"; Tower adjustable shelf 15"x30-9/16"
-- Sheet 7: Tower adjustable shelf 15"x30-9/16"; Tower adjustable shelf 15"x30-9/16"; Tower adjustable shelf 15"x30-9/16"; Tower adjustable shelf 15"x30-9/16"
+- Sheet 1: G Cabinet vertical 15-7/8"x87-1/8"; G Cabinet vertical 15-7/8"x87-1/8"; Tower side 14-7/8"x87-1/8"
+- Sheet 2: Tower side 14-7/8"x87-1/8"; Tower side 14-7/8"x87-1/8"; Tower side 14-7/8"x87-1/8"; H Header front rail 2-3/4"x64-3/8"
+- Sheet 3: Scribe strip (rip to fit walls) 3"x87-1/8"; Scribe strip (rip to fit walls) 3"x87-1/8"; E Bed face panel 32"x81-3/4"; B Side rail 5-7/8"x81-1/2"; H Header rear rail 2-3/4"x64-3/8"
+- Sheet 4: E Bed face panel 32"x81-3/4"; B Side rail 5-7/8"x81-1/2"; D Head rail 5-7/8"x62"; C Foot rail 3"x62"
+- Sheet 5: F Headboard 15-7/8"x64-3/8"; H Header board 14-3/8"x64-3/8"; Tower door (full overlay) 16"x31-7/8"; Tower door (full overlay) 16"x31-7/8"; Tower top 14-7/8"x30-13/16"; Tower top 14-7/8"x30-13/16"; Tower bottom (at base-molding height) 14-7/8"x30-13/16"
+- Sheet 6: Tower door (full overlay) 16"x31-7/8"; Tower door (full overlay) 16"x31-7/8"; Tower bottom (at base-molding height) 14-7/8"x30-13/16"; Tower fixed divider (lower/upper) 14-7/8"x30-13/16"; Tower fixed divider (lower/upper) 14-7/8"x30-13/16"; Tower adjustable shelf 14-5/8"x30-9/16"; Tower adjustable shelf 14-5/8"x30-9/16"; Tower adjustable shelf 14-5/8"x30-9/16"; Tower adjustable shelf 14-5/8"x30-9/16"
+- Sheet 7: Tower adjustable shelf 14-5/8"x30-9/16"; Tower adjustable shelf 14-5/8"x30-9/16"
 
 **1/4" plywood: 4 sheet(s)**
 
