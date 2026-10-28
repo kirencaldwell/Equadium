@@ -1,0 +1,450 @@
+"""Parametric guest-room murphy bed + shelving design.
+
+Run:  python3 murphy-bed/design.py
+Writes cut list, sheet layouts, an OpenSCAD model and preview drawings to murphy-bed/out/.
+
+Coordinates (inches): x along the bed wall (0 = corner with the window wall),
+y out from the bed wall, z up from the floor.
+
+The bed cabinet follows the Create-A-Bed "Queen Vertical, Adjustable, plywood" plans
+exactly (UPDATED_Queen_Adjustable.pdf, pp. 2, 5, 6). Everything else is ours.
+"""
+import csv
+import math
+import os
+from dataclasses import dataclass, field
+from fractions import Fraction
+
+# ----------------------------------------------------------------------------
+# Parameters. Values marked (ASSUMED) must be measured before cutting.
+# ----------------------------------------------------------------------------
+WALL_W = 132.0          # bed wall length (given: 11 ft)
+CEIL_H = 96.0           # ceiling height (given: 8 ft, ASSUMED level)
+WINDOW_FROM_WALL = 30.0  # window starts 2.5 ft from the bed wall (given)
+ROOM_D = 130.0          # window-wall length, only used for drawings (ASSUMED)
+
+EXIST_CROWN_H = 3.5     # existing room crown height (ASSUMED)
+EXIST_CROWN_PROJ = 3.5  # ... and how far it sticks out (ASSUMED)
+NEW_CROWN_H = 3.5       # new crown, same style as existing (ASSUMED)
+NEW_CROWN_PROJ = 3.5
+BASE_H = 4.0            # new base molding / toe-kick height (ASSUMED)
+SCRIBE = 0.75           # fitting gap left at each wall end
+
+# Create-A-Bed queen vertical (plans p.2 and p.6)
+BED_W, BED_H, BED_D = 65.875, 87.125, 15.875
+BED_OPEN_PROJ = 87.0
+
+# Shelf towers: flush with the bed cabinet front so the crown runs straight.
+T = 0.75                # plywood thickness
+BACK_T = 0.25
+TOWER_D = BED_D
+TOWER_W = (WALL_W - BED_W - 2 * SCRIBE) / 2      # bed centered => both equal
+LOWER_H = 36.0          # top of lower (doored) section
+KERF = 0.125
+SHEET_W, SHEET_L = 48.0, 96.0
+
+
+def frac(x, denom=16):
+    """Format inches as a woodworker fraction, e.g. 15-7/8."""
+    f = Fraction(round(x * denom), denom)
+    whole, rem = divmod(f.numerator, f.denominator)
+    if rem == 0:
+        return f'{whole}"'
+    return f'{whole}-{rem}/{f.denominator}"' if whole else f'{rem}/{f.denominator}"'
+
+
+@dataclass
+class Part:
+    name: str
+    group: str      # bed | tower
+    mat: str        # '3/4 ply' | '1/4 ply' | 'solid'
+    qty: int
+    w: float        # across the grain / sheet width
+    l: float        # along the grain / sheet length
+    note: str = ''
+
+
+# ----------------------------------------------------------------------------
+# Cut list
+# ----------------------------------------------------------------------------
+def bed_parts():
+    """Straight from the Create-A-Bed bill of materials (plans p.6)."""
+    return [
+        Part('B Side rail', 'bed', '3/4 ply', 2, 5.875, 81.5, 'plywood only; pivot/ball-stud holes per plans pp.8-17'),
+        Part('C Foot rail', 'bed', '3/4 ply', 1, 3, 62),
+        Part('D Head rail', 'bed', '3/4 ply', 1, 5.875, 62),
+        Part('E Bed face panel', 'bed', '3/4 ply', 2, 32, 81.75, 'best face out; edge-band long edges'),
+        Part('F Headboard', 'bed', '3/4 ply', 1, 15.875, 64.375),
+        Part('G Cabinet vertical', 'bed', '3/4 ply', 2, 15.875, 87.125, 'notch rear bottom for baseboard (plans p.8, step 14)'),
+        Part('H Header board', 'bed', '3/4 ply', 1, 14.375, 64.375),
+        Part('H Header front rail', 'bed', '3/4 ply', 1, 2.75, 64.375),
+        Part('H Header rear rail', 'bed', '3/4 ply', 1, 2.75, 64.375, 'glue + screw; carries the wall anchors'),
+        Part('J Mattress support', 'bed', '1/4 ply', 2, 31, 80),
+        Part('A Frame strut', 'bed', 'solid', 10, 1.5, 60.5, '3/4" thick; poplar/maple/clear pine'),
+        Part('A Frame side', 'bed', 'solid', 2, 1.5, 80, '3/4" thick'),
+        Part('H Mounting cleat', 'bed', 'solid', 2, 1.5, 14.375, '3/4" thick'),
+        Part('I Leg support rail', 'bed', 'solid', 1, 0.75, 60.25, '3/4" square'),
+    ]
+
+
+def tower_parts():
+    n = 2                                   # two identical towers (bed centered)
+    inner = TOWER_W - 2 * T
+    side_d = TOWER_D - BACK_T               # back panel applied over rear edges
+    door_w = TOWER_W / 2 - 0.125
+    door_h = LOWER_H - BASE_H - 0.125
+    return [
+        Part('Tower side', 'tower', '3/4 ply', 2 * n, side_d, BED_H, 'notch rear bottom for baseboard'),
+        Part('Tower top', 'tower', '3/4 ply', n, side_d, inner),
+        Part('Tower bottom (at base-molding height)', 'tower', '3/4 ply', n, side_d, inner),
+        Part('Tower fixed divider (lower/upper)', 'tower', '3/4 ply', n, side_d, inner),
+        Part('Tower adjustable shelf', 'tower', '3/4 ply', 3 * n, side_d - 0.625, inner - 0.25,
+             'band front edge; 5 mm shelf-pin holes'),
+        Part('Tower door (full overlay)', 'tower', '3/4 ply', 2 * n, door_w, door_h),
+        Part('Tower back', 'tower', '1/4 ply', n, TOWER_W, BED_H),
+        Part('Scribe strip (rip to fit walls)', 'tower', '3/4 ply', 2, 3.0, BED_H, 'face-attached to outer tower sides'),
+    ]
+
+
+def trim_list():
+    run = WALL_W
+    ret = BED_D + NEW_CROWN_PROJ - 0.0
+    return [
+        ('Crown moulding, front run', f'{WALL_W / 12:.1f} ft ({frac(run)}) + mitre waste'),
+        ('Crown moulding, end returns', f'2 x {frac(ret)} (return to each end wall)'),
+        ('Base moulding, front run', f'{WALL_W / 12:.1f} ft ({frac(run)}) + mitre waste'),
+        ('Base moulding, end returns', f'2 x {frac(BED_D + 0.75)}'),
+        ('Edge banding', '13/16" iron-on, ~80 ft for bed (plans) + ~65 ft for towers/shelves'),
+    ]
+
+
+# ----------------------------------------------------------------------------
+# Sheet packer (guillotine, grain along length, no rotation)
+# ----------------------------------------------------------------------------
+def expand(parts):
+    out = []
+    for p in parts:
+        out += [(f'{p.name}', p.w, p.l)] * p.qty
+    return out
+
+
+def pack_once(items, remnants, order):
+    items = sorted(items, key=order)
+    sheets = [{'free': [(0, 0, w, h)], 'placed': [], 'remnant': True, 'w': w, 'l': h} for (w, h) in remnants]
+    for name, pw, pl in items:
+        spot = None
+        for si, s in enumerate(sheets):
+            best = None
+            for ri, (rx, ry, rw, rh) in enumerate(s['free']):
+                if pw <= rw + 1e-9 and pl <= rh + 1e-9:
+                    score = min(rw - pw, rh - pl)
+                    if best is None or score < best[0]:
+                        best = (score, ri)
+            if best:
+                spot = (si, best[1])
+                break
+        if spot is None:
+            sheets.append({'free': [(0, 0, SHEET_W, SHEET_L)], 'placed': [], 'remnant': False, 'w': SHEET_W, 'l': SHEET_L})
+            spot = (len(sheets) - 1, 0)
+        s = sheets[spot[0]]
+        rx, ry, rw, rh = s['free'].pop(spot[1])
+        s['placed'].append((name, rx, ry, pw, pl))
+        lw, lh = rw - pw - KERF, rh - pl - KERF
+        if (rw - pw) < (rh - pl):
+            news = [(rx + pw + KERF, ry, lw, pl), (rx, ry + pl + KERF, rw, lh)]
+        else:
+            news = [(rx + pw + KERF, ry, lw, rh), (rx, ry + pl + KERF, pw, lh)]
+        s['free'] += [r for r in news if r[2] > 0.5 and r[3] > 0.5]
+    return sheets
+
+
+def pack(items, remnants=()):
+    orders = [lambda i: (-i[2], -i[1]), lambda i: (-i[1] * i[2]), lambda i: (-i[1], -i[2])]
+    best = None
+    for o in orders:
+        res = pack_once(items, remnants, o)
+        new = sum(1 for s in res if not s['remnant'])
+        waste = sum(s['w'] * s['l'] for s in res if not s['remnant']) - sum(
+            pw * pl for s in res if not s['remnant'] for _, _, _, pw, pl in s['placed'])
+        if best is None or (new, waste) < best[0]:
+            best = ((new, waste), res)
+    return best[1]
+
+
+# ----------------------------------------------------------------------------
+# 3D boxes for the model/preview: (name, group, x, y, z, dx, dy, dz)
+# ----------------------------------------------------------------------------
+def boxes():
+    b = []
+    tw = TOWER_W
+    x_left = SCRIBE
+    x_bed = SCRIBE + tw
+    x_right = x_bed + BED_W
+    # bed cabinet
+    b.append(('bed vertical L', 'bed', x_bed, 0, 0, T, BED_D, BED_H))
+    b.append(('bed vertical R', 'bed', x_right - T, 0, 0, T, BED_D, BED_H))
+    b.append(('bed header', 'bed', x_bed + T, 0, BED_H - 5.375, BED_W - 2 * T, BED_D, 5.375))
+    b.append(('bed face (closed)', 'bed', x_bed + T + 0.5, BED_D - 0.75 - 0.125, 4.0, BED_W - 2 * T - 1.0, 0.75, 81.75))
+    b.append(('bed frame (closed)', 'bedin', x_bed + T + 0.75, BED_D - 0.875 - 6.0, 4.0, BED_W - 2 * T - 1.5, 6.0, 81.0))
+    for nm, x0 in (('L', x_left), ('R', x_right)):
+        b.append((f'tower side out {nm}', 'tower', x0, 0, 0, T, TOWER_D, BED_H))
+        b.append((f'tower side in {nm}', 'tower', x0 + tw - T, 0, 0, T, TOWER_D, BED_H))
+        b.append((f'tower back {nm}', 'tower', x0, 0, 0, tw, BACK_T, BED_H))
+        for z in (BASE_H, LOWER_H - T, BED_H - T):
+            b.append((f'tower fixed {nm} z{z}', 'tower', x0 + T, BACK_T, z, tw - 2 * T, TOWER_D - BACK_T - 0.75, T))
+        up_lo, up_hi = LOWER_H, BED_H - T
+        gap = (up_hi - up_lo - 3 * T) / 4
+        for k in range(1, 4):
+            z = up_lo + k * gap + (k - 1) * T
+            b.append((f'tower shelf {nm} {k}', 'shelf', x0 + T + 0.125, BACK_T, z, tw - 2 * T - 0.25, TOWER_D - BACK_T - 0.75 - 0.625, T))
+        dw = tw / 2 - 0.125
+        for j in range(2):
+            b.append((f'door {nm}{j}', 'door', x0 + 0.0625 + j * (dw + 0.125), TOWER_D - T, BASE_H, dw, T, LOWER_H - BASE_H - 0.125))
+    # trim
+    b.append(('base molding', 'trim', SCRIBE, TOWER_D, 0, WALL_W - 2 * SCRIBE, 0.75, BASE_H))
+    b.append(('crown', 'trim', SCRIBE, 0, BED_H, WALL_W - 2 * SCRIBE, TOWER_D + NEW_CROWN_PROJ, NEW_CROWN_H))
+    return b
+
+
+COLORS = {'bed': '#c9a46c', 'bedin': '#a98550', 'tower': '#d8c29a', 'shelf': '#cfb284', 'door': '#e6d5b0', 'trim': '#f3ede0'}
+
+
+def write_scad(path):
+    lines = ['// Generated by design.py - open in OpenSCAD (free).  Units: inches.', 'union() {']
+    for name, g, x, y, z, dx, dy, dz in boxes():
+        lines.append(f'  // {name}\n  translate([{x:.4f},{y:.4f},{z:.4f}]) cube([{dx:.4f},{dy:.4f},{dz:.4f}]);')
+    lines.append('}')
+    lines.append('// Room reference (wall, ceiling): comment out if unwanted')
+    lines.append(f'%translate([0,-1,0]) cube([{WALL_W},1,{CEIL_H}]);')
+    with open(path, 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+
+
+# ----------------------------------------------------------------------------
+# Reports
+# ----------------------------------------------------------------------------
+def sheet_report(title, sheets):
+    new = [s for s in sheets if not s['remnant']]
+    out = [f'**{title}: {len(new)} new sheet(s)**' + (' (plus bed-kit offcut)' if any(s['remnant'] for s in sheets) else ''), '']
+    for i, s in enumerate(sheets):
+        label = 'Bed-kit offcut' if s['remnant'] else f'Sheet {i + 1 - sum(1 for t in sheets[:i] if t["remnant"])}'
+        out.append(f'- {label}: ' + '; '.join(f'{n} {frac(w)}x{frac(h)}' for n, _, _, w, h in s['placed']))
+    return out
+
+
+def write_reports(outdir):
+    bed, tower = bed_parts(), tower_parts()
+    rows = []
+    for grp in (bed, tower):
+        for p in grp:
+            rows.append([p.group, p.name, p.mat, p.qty, frac(p.w), frac(p.l), p.note])
+    with open(os.path.join(outdir, 'cutlist.csv'), 'w', newline='') as f:
+        wr = csv.writer(f)
+        wr.writerow(['group', 'part', 'material', 'qty', 'width (across grain)', 'length (along grain)', 'notes'])
+        wr.writerows(rows)
+
+    tower_34 = [p for p in tower if p.mat == '3/4 ply']
+    tower_14 = [p for p in tower if p.mat == '1/4 ply']
+    # Offcut from bed-kit sheet 4 (plans p.5): 14-3/8" strip used, rest of the 48" width is free.
+    offcut = (SHEET_W - 14.375, SHEET_L)
+    s34 = pack(expand(tower_34), remnants=[offcut])
+    s14 = pack(expand(tower_14))
+    s34_fresh = pack(expand(tower_34))
+
+    md = []
+    md.append('# Cut list\n')
+    md.append(f'Centered layout on an {WALL_W / 12:.0f} ft wall: towers {frac(TOWER_W)} wide each, bed cabinet {frac(BED_W)}, '
+              f'{frac(SCRIBE)} fitting gap at each wall. Everything {frac(BED_H)} tall + {frac(NEW_CROWN_H)} crown '
+              f'= {frac(BED_H + NEW_CROWN_H)} under a {frac(CEIL_H)} ceiling.\n')
+    for title, grp in (('Murphy bed cabinet (Create-A-Bed plans, do not alter)', bed), ('Shelf towers (x2, mirror-identical)', tower)):
+        md.append(f'## {title}\n')
+        md.append('| Part | Material | Qty | Width | Length | Notes |')
+        md.append('|---|---|---|---|---|---|')
+        for p in grp:
+            md.append(f'| {p.name} | {p.mat} | {p.qty} | {frac(p.w)} | {frac(p.l)} | {p.note} |')
+        md.append('')
+    md.append('## Sheet goods\n')
+    md.append('Bed cabinet, per plans p.5: **4 sheets 3/4" ply + 2 sheets 1/4" ply** (4x8). Their cutting guide is used as-is.\n')
+    md += sheet_report('Towers 3/4" ply (using bed sheet-4 offcut)', s34) + ['']
+    md.append(f'Without using the offcut: {sum(1 for s in s34_fresh)} sheets.\n')
+    md += sheet_report('Towers 1/4" backs', s14) + ['']
+    new34 = sum(1 for s in s34 if not s['remnant'])
+    new14 = sum(1 for s in s14 if not s['remnant'])
+    md.append(f'**Order total: {4 + new34} sheets 3/4" ply, {2 + new14} sheets 1/4" ply** '
+              f'(+ 1 spare 3/4" recommended for mistakes).\n')
+    md.append('## Trim\n')
+    md += [f'- {a}: {b}' for a, b in trim_list()]
+    md.append('')
+    md.append('## Hardware (not in the kit)\n')
+    md += ['- 5 mm shelf pins: 24 (4 per shelf x 6)',
+           '- Concealed hinges, full overlay: 8 (2 per door x 4) + 4 door pulls',
+           '- 3" coarse-thread screws or lags into studs: 4 per bed header (kit plans p.10) - confirm stud locations',
+           '- Tower-to-wall anchors: 2 cleats or 4 screws per tower; tower-to-bed-cabinet clamp screws through the adjoining sides',
+           '- #8 x 1-1/4" and 1-1/2" screws, glue, 1-1/2" finish nails (per kit BOM)']
+    md.append('\n## Assumptions to verify\n')
+    md += [f'- Ceiling {frac(CEIL_H)} and level; floor level',
+           f'- Existing crown {frac(EXIST_CROWN_H)} tall x {frac(EXIST_CROWN_PROJ)} proud; new crown {frac(NEW_CROWN_H)} tall (matches style, not measured)',
+           f'- Gap between new crown top ({frac(BED_H + NEW_CROWN_H)}) and bottom of existing crown ({frac(CEIL_H - EXIST_CROWN_H)}) is {frac(CEIL_H - EXIST_CROWN_H - BED_H - NEW_CROWN_H)}: add a frieze board or taller crown to close it',
+           f'- Base moulding {frac(BASE_H)} tall; check it stays below the bed face panel',
+           '- Bed wall is flat and has studs at usable spacing; the kit requires wood/metal-stud/masonry anchoring (plans p.10)',
+           f'- Window starts {frac(WINDOW_FROM_WALL)} from the bed wall: tower depth {frac(TOWER_D)} leaves {frac(WINDOW_FROM_WALL - TOWER_D)} to the window edge (trim not included)',
+           f'- Room is deep enough: open bed projects {frac(BED_OPEN_PROJ)} from the wall, so need > {frac(BED_OPEN_PROJ + 24)} for walking clearance (window-wall length not yet given)']
+    with open(os.path.join(outdir, 'cutlist.md'), 'w') as f:
+        f.write('\n'.join(md) + '\n')
+    return s34, s14
+
+
+# ----------------------------------------------------------------------------
+# Drawings
+# ----------------------------------------------------------------------------
+def draw_all(outdir, s34, s14):
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+    xl = SCRIBE
+    xb = SCRIBE + TOWER_W
+    xr = xb + BED_W
+
+    # --- front elevation ---
+    fig, ax = plt.subplots(figsize=(11, 8.5))
+    ax.add_patch(Rectangle((0, CEIL_H - EXIST_CROWN_H), WALL_W, EXIST_CROWN_H, fc='#eee', ec='#999', hatch='//'))
+    ax.add_patch(Rectangle((0, 0), WALL_W, CEIL_H, fc='none', ec='k'))
+    for x0 in (xl, xr):
+        ax.add_patch(Rectangle((x0, 0), TOWER_W, BED_H, fc=COLORS['tower'], ec='k'))
+        for z in (BASE_H, LOWER_H, BED_H - T):
+            ax.plot([x0, x0 + TOWER_W], [z, z], 'k', lw=1)
+        gap = (BED_H - T - LOWER_H - 3 * T) / 4
+        for k in range(1, 4):
+            z = LOWER_H + k * gap + (k - 1) * T
+            ax.plot([x0 + T, x0 + TOWER_W - T], [z, z], color='#8a6d3b', lw=1.5)
+        ax.plot([x0 + TOWER_W / 2] * 2, [BASE_H, LOWER_H], 'k', lw=1)
+        for hx in (x0 + TOWER_W / 2 - 2.5, x0 + TOWER_W / 2 + 2.5):
+            ax.plot([hx] * 2, [LOWER_H - 9, LOWER_H - 3], color='k', lw=2)
+    ax.add_patch(Rectangle((xb, 0), BED_W, BED_H, fc=COLORS['bed'], ec='k'))
+    ax.add_patch(Rectangle((xb + T + 0.5, 4), BED_W - 2 * T - 1, 81.75, fc='#e3c590', ec='k'))
+    ax.plot([xb + BED_W / 2] * 2, [4, 85.75], 'k', lw=1)
+    for hx in (xb + BED_W / 2 - 3, xb + BED_W / 2 + 3):
+        ax.plot([hx] * 2, [62, 70], 'k', lw=2.5)
+    ax.add_patch(Rectangle((xl, 0), WALL_W - 2 * SCRIBE, BASE_H, fc=COLORS['trim'], ec='k'))
+    ax.add_patch(Rectangle((xl, BED_H), WALL_W - 2 * SCRIBE, NEW_CROWN_H, fc=COLORS['trim'], ec='k'))
+    ax.text(xl + TOWER_W / 2, 60, 'open shelves\n(3 adjustable)', ha='center', fontsize=9)
+    ax.text(xl + TOWER_W / 2, 20, 'doors', ha='center', fontsize=9)
+    ax.text(xb + BED_W / 2, 40, 'MURPHY BED\n(Create-A-Bed queen vertical)', ha='center', fontsize=10)
+    ax.annotate('', (xl, -6), (xb, -6), arrowprops=dict(arrowstyle='<->'))
+    ax.text((xl + xb) / 2, -10, frac(TOWER_W), ha='center', fontsize=9)
+    ax.annotate('', (xb, -6), (xr, -6), arrowprops=dict(arrowstyle='<->'))
+    ax.text((xb + xr) / 2, -10, frac(BED_W), ha='center', fontsize=9)
+    ax.annotate('', (xr, -6), (xr + TOWER_W, -6), arrowprops=dict(arrowstyle='<->'))
+    ax.text(xr + TOWER_W / 2, -10, frac(TOWER_W), ha='center', fontsize=9)
+    ax.text(WALL_W + 2, BED_H / 2, f'{frac(BED_H)}', rotation=90, va='center', fontsize=9)
+    ax.text(WALL_W + 2, CEIL_H - EXIST_CROWN_H / 2, 'existing crown', va='center', fontsize=7)
+    ax.set_xlim(-8, WALL_W + 10)
+    ax.set_ylim(-16, CEIL_H + 4)
+    ax.set_aspect('equal')
+    ax.set_title('Front elevation - bed wall (window wall at left, x = 0)')
+    ax.axis('off')
+    fig.savefig(os.path.join(outdir, 'front_elevation.png'), dpi=130, bbox_inches='tight')
+    plt.close(fig)
+
+    # --- plan view ---
+    fig, ax = plt.subplots(figsize=(10, 9))
+    ax.add_patch(Rectangle((0, 0), WALL_W, ROOM_D, fc='none', ec='k', lw=2))
+    ax.add_patch(Rectangle((xl, 0), TOWER_W, TOWER_D, fc=COLORS['tower'], ec='k'))
+    ax.add_patch(Rectangle((xr, 0), TOWER_W, TOWER_D, fc=COLORS['tower'], ec='k'))
+    ax.add_patch(Rectangle((xb, 0), BED_W, BED_D, fc=COLORS['bed'], ec='k'))
+    ax.add_patch(Rectangle((xb, BED_D), BED_W, BED_OPEN_PROJ - BED_D, fc='#bcd', ec='#369', ls='--', alpha=0.6))
+    ax.text(WALL_W / 2, 55, f'bed open\n{frac(BED_OPEN_PROJ)} from wall (queen, 60" x 80" mattress)', ha='center', fontsize=10)
+    ax.plot([0, 0], [WINDOW_FROM_WALL, WINDOW_FROM_WALL + 48], color='#06c', lw=6)
+    ax.text(3, WINDOW_FROM_WALL + 24, 'window\n(starts 30"; width assumed)', fontsize=8, color='#06c')
+    ax.annotate('', (0, TOWER_D), (0, WINDOW_FROM_WALL), arrowprops=dict(arrowstyle='<->', color='r'))
+    ax.text(-4, (TOWER_D + WINDOW_FROM_WALL) / 2, f'{frac(WINDOW_FROM_WALL - TOWER_D)}\nclear', rotation=90, va='center', ha='right', color='r', fontsize=8)
+    ax.text(WALL_W / 2, 7, 'shelf tower | bed cabinet | shelf tower', ha='center', fontsize=9)
+    ax.set_xlim(-20, WALL_W + 10)
+    ax.set_ylim(ROOM_D + 8, -8)
+    ax.set_aspect('equal')
+    ax.set_title('Plan view (top = bed wall). Room depth beyond 87" and door not yet known.')
+    ax.axis('off')
+    fig.savefig(os.path.join(outdir, 'plan.png'), dpi=130, bbox_inches='tight')
+    plt.close(fig)
+
+    # --- side section ---
+    fig, ax = plt.subplots(figsize=(11, 6))
+    ax.plot([0, 0], [0, CEIL_H], 'k', lw=3)
+    ax.plot([0, 120], [0, 0], 'k', lw=2)
+    ax.plot([0, 120], [CEIL_H, CEIL_H], 'k', lw=2)
+    ax.add_patch(Rectangle((0, CEIL_H - EXIST_CROWN_H), EXIST_CROWN_PROJ, EXIST_CROWN_H, fc='#eee', ec='#666', hatch='//'))
+    ax.add_patch(Rectangle((0, 0), BED_D, BED_H, fc=COLORS['bed'], ec='k', alpha=0.8))
+    ax.add_patch(Rectangle((0, BED_H), BED_D + NEW_CROWN_PROJ, NEW_CROWN_H, fc=COLORS['trim'], ec='k'))
+    ax.add_patch(Rectangle((BED_D - 0.75 - 6.9, 4), 7, 81.75, fc='#a98550', ec='k', alpha=0.9))
+    # open bed (approximate deck height: legs ~14" + 12" mattress)
+    ax.add_patch(Rectangle((BED_D - 1, 14), BED_OPEN_PROJ - BED_D + 1, 12 + 6, fc='#bcd', ec='#369', ls='--', alpha=0.6))
+    ax.text(55, 36, 'bed open (deck height approximate)', ha='center', fontsize=9, color='#369')
+    ax.text(BED_D / 2, BED_H / 2, 'cabinet', rotation=90, ha='center', va='center')
+    ax.annotate('', (0, -4), (BED_OPEN_PROJ, -4), arrowprops=dict(arrowstyle='<->'))
+    ax.text(BED_OPEN_PROJ / 2, -9, f'{frac(BED_OPEN_PROJ)} projection', ha='center', fontsize=9)
+    ax.annotate('', (-4, BED_H + NEW_CROWN_H), (-4, CEIL_H - EXIST_CROWN_H), arrowprops=dict(arrowstyle='<->', color='r'))
+    ax.text(-6, (BED_H + NEW_CROWN_H + CEIL_H - EXIST_CROWN_H) / 2,
+            f'{frac(CEIL_H - EXIST_CROWN_H - BED_H - NEW_CROWN_H)}\ngap', color='r', ha='right', va='center', fontsize=8)
+    ax.set_xlim(-14, 118)
+    ax.set_ylim(-14, CEIL_H + 4)
+    ax.set_aspect('equal')
+    ax.set_title('Side section (wall at left)')
+    ax.axis('off')
+    fig.savefig(os.path.join(outdir, 'side_section.png'), dpi=130, bbox_inches='tight')
+    plt.close(fig)
+
+    # --- isometric ---
+    fig = plt.figure(figsize=(11, 8))
+    ax = fig.add_subplot(111, projection='3d')
+
+    def faces(x, y, z, dx, dy, dz):
+        v = [(x, y, z), (x + dx, y, z), (x + dx, y + dy, z), (x, y + dy, z),
+             (x, y, z + dz), (x + dx, y, z + dz), (x + dx, y + dy, z + dz), (x, y + dy, z + dz)]
+        idx = [(0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4), (2, 3, 7, 6), (1, 2, 6, 5), (0, 3, 7, 4)]
+        return [[v[i] for i in f] for f in idx]
+
+    for name, g, x, y, z, dx, dy, dz in boxes():
+        ax.add_collection3d(Poly3DCollection(faces(x, y, z, dx, dy, dz), facecolors=COLORS[g], edgecolors='#555', linewidths=0.4))
+    ax.set_xlim(0, WALL_W)
+    ax.set_ylim(0, 60)
+    ax.set_zlim(0, CEIL_H)
+    ax.set_box_aspect((WALL_W, 65, CEIL_H))
+    ax.view_init(elev=14, azim=68)
+    ax.set_axis_off()
+    ax.set_title('Model preview (bed closed)')
+    fig.savefig(os.path.join(outdir, 'iso.png'), dpi=130, bbox_inches='tight')
+    plt.close(fig)
+
+    # --- sheet layouts ---
+    for tag, sheets in (('3-4', s34), ('1-4', s14)):
+        n = len(sheets)
+        fig, axes = plt.subplots(1, n, figsize=(4.2 * n, 8.5), squeeze=False)
+        for ax, s in zip(axes[0], sheets):
+            ax.add_patch(Rectangle((0, 0), s['w'], s['l'], fc='#f6f1e6', ec='k'))
+            for name, x, y, w, h in s['placed']:
+                ax.add_patch(Rectangle((x, y), w, h, fc='#d8c29a', ec='k'))
+                ax.text(x + w / 2, y + h / 2, f'{name.replace("Tower ", "").split(" (")[0]}\n{frac(w)} x {frac(h)}', ha='center', va='center', fontsize=6, rotation=90 if w < 20 and h > 40 else 0)
+            ax.set_xlim(-2, SHEET_W + 2)
+            ax.set_ylim(-2, SHEET_L + 2)
+            ax.set_aspect('equal')
+            ax.set_title('Bed-kit offcut' if s['remnant'] else 'New sheet', fontsize=9)
+            ax.axis('off')
+        fig.suptitle(f'Shelf-tower {tag.replace("-", "/")}" plywood layout (grain runs vertical)')
+        fig.savefig(os.path.join(outdir, f'sheets_{tag}.png'), dpi=110, bbox_inches='tight')
+        plt.close(fig)
+
+
+def main():
+    outdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'out')
+    os.makedirs(outdir, exist_ok=True)
+    s34, s14 = write_reports(outdir)
+    write_scad(os.path.join(outdir, 'model.scad'))
+    draw_all(outdir, s34, s14)
+    print(f'wrote {outdir}')
+
+
+if __name__ == '__main__':
+    main()
