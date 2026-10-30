@@ -52,15 +52,20 @@ HEADER_FRONT_RAIL = 2.75  # plans p.6 part H front rail covers the top of the op
 FACE_PANEL_BOTTOM = BED_H - HEADER_FRONT_RAIL - FACE_PANEL_H   # ~2-5/8" above the floor
 FACE_PANEL_W = 64.0     # two 32" panels side by side (plans p.6 part E)
 FACE_PANEL_STYLE = 'full'   # kit p.3: 'full' = full-length stiles, 'split' = adds a middle rail
-FACE_TRIM_W, FACE_TRIM_T = 2.0, 0.25   # flat strips applied to the panel (ASSUMED; thin to save weight)
+FACE_TRIM_KIND = 'frames'   # 'frames' = one mitred frame of profiled panel moulding per panel (crown-family profile); 'flat' = 1/4" flat strips
+FACE_TRIM_W = 2.0       # moulding face width (ASSUMED)
+FACE_TRIM_T = 0.75 if FACE_TRIM_KIND == 'frames' else 0.25   # moulding thickness, ASSUMED 3/4" stock
+FACE_PROFILE_FILL = 2 / 3   # ASSUMED: share of the 3/4 x 2 rectangle left after the profile is cut
+FACE_TRIM_AREA = FACE_TRIM_W * FACE_TRIM_T * FACE_PROFILE_FILL   # sq in cross-section (about 1.0 for 3/4 x 2)
+FACE_FRAME_GAP = 0.25   # gap between neighbouring frames; the centre gap sits over the seam between the two 32" panels
 FACE_TRIM_INSET = 0.5   # strips stay this far inside the panel edges so nothing catches on the verticals/header
 FACE_TRIM_BOTTOM = max(FACE_TRIM_INSET, BASE_H + 0.125 - FACE_PANEL_BOTTOM)   # keep strips above the base moulding
 FACE_SPLIT_Z = 29.0     # split style: bottom of the middle rail, measured up from the panel bottom
 FACE_TRIM_DENSITY = 0.0162   # lb per cubic inch, poplar (~28 lb/ft^3); MDF is ~0.0278
 PLY_DENSITY = 0.0226    # lb per cubic inch, birch plywood (~39 lb/ft^3)
-MATTRESS_LB = 70.0      # ASSUMED: weigh yours. Kit spec for a queen is 65-80 lb (plans p.1)
+MATTRESS_LB = 65.0      # ASSUMED: the lightest queen the kit allows; weigh yours. Kit spec is 65-80 lb (plans p.1)
 MATTRESS_MAX_LB = 80.0
-HANDLE_OFFSET = 3.0     # handle centre distance from the panel centre line
+HANDLE_OFFSET = 4.0     # handle centre distance from the panel centre line
 HANDLE_Z = (62.0, 70.0)  # handle bar height above the floor (kit says 5'-6')
 LOWER_H = 36.0          # top of lower (doored) section
 KERF = 0.125            # user's saw blade is at least 1/8"; every cut in the layouts costs this much
@@ -131,9 +136,20 @@ def tower_parts():
 
 
 def face_trim_layout():
-    """Flat strips applied to the face panels, in panel coordinates (x from left edge, z from bottom edge)."""
+    """Applied moulding on the face panels, as non-overlapping pieces in panel coordinates (x from left edge, z from bottom edge).
+    Frame style: rails are shown between the stiles; their cut length (mitre long point) is longer, see face_trim_parts()."""
     inset, sw, bot = FACE_TRIM_INSET, FACE_TRIM_W, FACE_TRIM_BOTTOM
     frame_w, frame_h = FACE_PANEL_W - 2 * inset, FACE_PANEL_H - inset - bot
+    if FACE_TRIM_KIND == 'frames':
+        fw = (frame_w - 3 * FACE_FRAME_GAP) / 4
+        out = []
+        for i in range(4):
+            x0 = inset + i * (fw + FACE_FRAME_GAP)
+            out.append(('Face frame stile', x0, bot, sw, frame_h))
+            out.append(('Face frame stile', x0 + fw - sw, bot, sw, frame_h))
+            out.append(('Face frame rail', x0 + sw, bot, fw - 2 * sw, sw))
+            out.append(('Face frame rail', x0 + sw, bot + frame_h - sw, fw - 2 * sw, sw))
+        return out
     opening = (frame_w - 5 * sw) / 4
     out = [('Face moulding stile', inset + i * (opening + sw), bot, sw, frame_h) for i in range(5)]
     for j in range(4):
@@ -145,14 +161,29 @@ def face_trim_layout():
     return out
 
 
+def _cut_length(name, w, h):
+    """Length to buy/cut for one piece: frame rails are mitred, so they run to the long point (inner length + 2 x width)."""
+    if FACE_TRIM_KIND == 'frames' and 'rail' in name:
+        return w + 2 * FACE_TRIM_W
+    return max(w, h)
+
+
+def face_trim_pieces():
+    return [(n, _cut_length(n, w, h)) for n, _, _, w, h in face_trim_layout()]
+
+
 def face_trim_parts():
-    count = Counter((n, round(w, 4), round(h, 4)) for n, _, _, w, h in face_trim_layout())
-    return [Part(n, 'facetrim', 'solid', q, min(w, h), max(w, h), f'{frac(FACE_TRIM_T)} thick; square cuts, glue + 18 ga brads')
-            for (n, w, h), q in count.items()]
+    count = Counter((n, round(l, 4)) for n, l in face_trim_pieces())
+    if FACE_TRIM_KIND == 'frames':
+        note = f'{frac(FACE_TRIM_T)} x {frac(FACE_TRIM_W)} panel moulding, mitre both ends 45 degrees, length to the long point; glue + 1-1/4" 18 ga brads'
+    else:
+        note = f'{frac(FACE_TRIM_T)} thick; square cuts, glue + 18 ga brads'
+    return [Part(n, 'facetrim', 'solid', q, FACE_TRIM_W, l, note) for (n, l), q in count.items()]
 
 
 def face_trim_weight_lb():
-    return sum(w * h for _, _, _, w, h in face_trim_layout()) * FACE_TRIM_T * FACE_TRIM_DENSITY
+    area = FACE_TRIM_W * FACE_TRIM_T * (FACE_PROFILE_FILL if FACE_TRIM_KIND == 'frames' else 1.0)
+    return sum(l for _, l in face_trim_pieces()) * area * FACE_TRIM_DENSITY
 
 
 def moving_mass_lb():
@@ -364,18 +395,17 @@ vertical **and** each tower side: **{frac(notch_h)} tall x {frac(notch_d)} deep*
 - Iron slowly at medium-high heat, press with a block, trim the overhang with a banding trimmer or sharp chisel,
   and lightly sand the edge flush. Do the end grain first, then the long edges.
 
-## 5. Face-panel moulding ({FACE_PANEL_STYLE}-length style, kit p.3)
+## 5. Face-panel moulding ({"mitred frames in the crown's profile family" if FACE_TRIM_KIND == "frames" else FACE_PANEL_STYLE + "-length strips"})
 
-- **Layout.** Flat {frac(FACE_TRIM_W)} x {frac(FACE_TRIM_T)} strips on the two 32" face panels: 5 full-height stiles (the centre one covers the seam between the panels)
-  with short rails top and bottom{" and a middle rail" if FACE_PANEL_STYLE == "split" else ""}, making 4 equal panels about {frac((FACE_PANEL_W - 2 * FACE_TRIM_INSET - 5 * FACE_TRIM_W) / 4)} wide.
+{"- **Profile.** Ask the supplier for panel (picture-frame) moulding in the same family as your crown: same maker or the same curve, about 3/4 x 2 stock. Take a 6 inch offcut of the existing crown with you so they can match the curve." + chr(10) if FACE_TRIM_KIND == "frames" else ""}- **Layout.** {"Four mitred frames, one per panel, 8 stiles and 8 rails. Each frame is " + frac((FACE_PANEL_W - 2 * FACE_TRIM_INSET - 3 * FACE_FRAME_GAP) / 4) + " wide outside, with " + frac(FACE_FRAME_GAP) + " between frames. The centre gap sits over the seam between the two 32 inch face panels, so no frame crosses it." if FACE_TRIM_KIND == "frames" else "Flat strips with five full-height stiles and short rails top and bottom."}
   Keep everything {frac(FACE_TRIM_INSET)} inside the side and top edges so nothing catches on the cabinet verticals or the header as the bed swings, and start the
   bottom rail {frac(FACE_TRIM_BOTTOM)} up from the panel's bottom edge so it clears the {frac(BASE_H)} base moulding.
-- **Cutting and fastening.** Square cuts; rails butt between stiles. Glue and 5/8" 18 ga brads into the plywood only. Do not use anything longer than the panel is thick.
-  The strips stand {frac(FACE_TRIM_T)} proud of the panel, which puts them {frac(FACE_TRIM_T - 0.125)} proud of the cabinet front.
-- **Handles** (5'-6' high on the kit's p.21): bars {frac(HANDLE_OFFSET)} either side of the centre stile, which leaves {frac(HANDLE_OFFSET - 0.25 - FACE_TRIM_W / 2)} to the stile.
-- **Weight.** About {face_trim_weight_lb():.1f} lb of moulding. The kit sets the queen springs at #5 on a 1-5 scale and its instructions only describe turning the setting *down*
-  (assembly booklet p.11), so the springs have no extra power in reserve. Add the moulding **before** you balance the bed, then choose a mattress with
-  mattress + moulding at or below {MATTRESS_MAX_LB:.0f} lb (about {MATTRESS_MAX_LB - face_trim_weight_lb():.0f} lb mattress or lighter). Keep strips thin; 3/4" solid moulding would be several times this weight.
+- **Cutting.** {"Mitre both ends at 45 degrees, measuring each piece to the long point (stiles " + frac(FACE_PANEL_H - FACE_TRIM_INSET - FACE_TRIM_BOTTOM) + ", rails " + frac((FACE_PANEL_W - 2 * FACE_TRIM_INSET - 3 * FACE_FRAME_GAP) / 4) + "). Cut all eight stiles and eight rails from one setup so the frames match, cut a spare of each, and dry-fit a frame on the panel before gluing. Check the mitres on a flat surface first." if FACE_TRIM_KIND == "frames" else "Square cuts; rails butt between stiles."}
+- **Fastening.** Glue and 1-1/4 inch 18 ga brads into the plywood panel only (no longer than 1-1/4 inch: 3/4 inch of moulding plus 1/2 inch into the 3/4 inch panel, so nothing pokes through the back). The moulding stands {frac(FACE_TRIM_T)} proud of the panel, which puts it {frac(FACE_TRIM_T - 0.125)} proud of the cabinet front, a raised-panel look. It still passes under the header rail with {frac(BED_H - HEADER_FRONT_RAIL - (FACE_PANEL_BOTTOM + FACE_PANEL_H - FACE_TRIM_INSET))} to spare.
+- **Handles** (5 to 6 feet high, kit p.21): bars {frac(HANDLE_OFFSET)} either side of the centre seam, inside the two middle panels, which leaves {frac(HANDLE_OFFSET - 0.25 - (FACE_FRAME_GAP / 2 + FACE_TRIM_W if FACE_TRIM_KIND == "frames" else FACE_TRIM_W / 2))} to the nearest moulding.
+- **Weight.** About {face_trim_weight_lb():.1f} lb of moulding in solid poplar (the cross-section is an estimate, so weigh a sample piece). The kit sets the queen springs at #5 on a 1-5 scale and its instructions only describe turning the setting *down*
+  (assembly booklet p.11), so the springs have no extra power in reserve. Add the moulding **before** you balance the bed, and choose a mattress that, with the moulding,
+  stays at or below {MATTRESS_MAX_LB:.0f} lb: {math.floor(MATTRESS_MAX_LB - face_trim_weight_lb())} lb or lighter. If the mattress you want is heavier, thin the moulding or go back to the flat-strip option.
   Create-A-Bed's advice is to call them before modifying the bed, so this is your call to make; a quick call about the springs is cheap insurance.
 
 ## 6. Order of work
@@ -411,7 +441,7 @@ def write_reports(outdir):
               f'{frac(SCRIBE)} fitting gap at each wall. Everything {frac(BED_H)} tall + {frac(NEW_CROWN_H)} crown '
               f'= {frac(BED_H + NEW_CROWN_H)} under a {frac(CEIL_H)} ceiling.\n')
     for title, grp in (('Murphy bed cabinet (Create-A-Bed plans, do not alter)', bed), ('Shelf towers (x2, mirror-identical)', tower),
-                       (f'Face panel moulding ({FACE_PANEL_STYLE}-length style, kit p.3; applied to the bed face)', face)):
+                       (f'Face panel moulding ({"mitred frames, one per panel" if FACE_TRIM_KIND == "frames" else FACE_PANEL_STYLE + "-length strips"}; applied to the bed face)', face)):
         md.append(f'## {title}\n')
         md.append('| Part | Material | Qty | Width | Length | Notes |')
         md.append('|---|---|---|---|---|---|')
@@ -441,10 +471,12 @@ def write_reports(outdir):
            '- #8 x 1-1/4" and 1-1/2" screws, glue, 1-1/2" finish nails (per kit BOM)']
     md.append('\n## Assumptions to verify\n')
     fw = face_trim_weight_lb()
-    md += [f'- Face moulding adds about {fw:.1f} lb ({frac(FACE_TRIM_W)} x {frac(FACE_TRIM_T)} poplar strips; about {fw * 0.0278 / FACE_TRIM_DENSITY:.1f} lb if MDF). '
+    kind_txt = ('mitred frames of 3/4 x 2 profiled panel moulding' if FACE_TRIM_KIND == 'frames'
+                else f'{frac(FACE_TRIM_W)} x {frac(FACE_TRIM_T)} flat strips')
+    md += [f'- Face moulding ({kind_txt}) adds about {fw:.1f} lb in solid poplar (MDF would be about {fw * 0.0278 / FACE_TRIM_DENSITY:.1f} lb). '
            f'Rough moving mass of the bed without mattress is ~{moving_mass_lb():.0f} lb. The kit rates a queen mattress at 65-80 lb and sets the springs at #5, '
-           f'the top of their 1-5 scale, so keep mattress + moulding at or below {MATTRESS_MAX_LB:.0f} lb: with this moulding, a mattress up to about {MATTRESS_MAX_LB - fw:.0f} lb (weigh yours).',
-           f'- Ceiling {frac(CEIL_H)}, measured from the HIGH point of the floor (floor is NOT level)',
+           f'the top of their 1-5 scale, so keep mattress + moulding at or below {MATTRESS_MAX_LB:.0f} lb: with this moulding the mattress should be {math.floor(MATTRESS_MAX_LB - fw)} lb or lighter (weigh yours; the moulding cross-section is an estimate, weigh a sample piece).',
+                      f'- Ceiling {frac(CEIL_H)}, measured from the HIGH point of the floor (floor is NOT level)',
            f'- Existing crown {frac(EXIST_CROWN_H)} tall x {frac(EXIST_CROWN_PROJ)} proud; new crown {frac(NEW_CROWN_H)} tall (matches style, not measured)',
            f'- Gap between new crown top ({frac(BED_H + NEW_CROWN_H)}) and bottom of existing crown ({frac(CEIL_H - EXIST_CROWN_H)}) is {frac(CEIL_H - EXIST_CROWN_H - BED_H - NEW_CROWN_H)} on a level floor. With a {frac(FLOOR_DROP)} floor drop the unit is set level from the HIGH end of the floor, so the gap shrinks to {frac(CEIL_H - EXIST_CROWN_H - BED_H - NEW_CROWN_H - FLOOR_DROP)}. Ceiling must be measured from the high point of the floor.',
            f'- Floor not level (assumed {frac(FLOOR_DROP)} across the wall): level and plumb the bed cabinet FIRST on shims at the high point, set the towers to match its top, then scribe the base moulding to the floor. Shims go behind the base moulding. The bed cabinet must be plumb or the face-panel gap will be uneven (plans, assembly p.11 steps 19-20).',

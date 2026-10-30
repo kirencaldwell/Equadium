@@ -48,18 +48,18 @@ vertical **and** each tower side: **4-5/8" tall x 5/8" deep**. For the 1/4" towe
 - Iron slowly at medium-high heat, press with a block, trim the overhang with a banding trimmer or sharp chisel,
   and lightly sand the edge flush. Do the end grain first, then the long edges.
 
-## 5. Face-panel moulding (full-length style, kit p.3)
+## 5. Face-panel moulding (mitred frames in the crown's profile family)
 
-- **Layout.** Flat 2" x 1/4" strips on the two 32" face panels: 5 full-height stiles (the centre one covers the seam between the panels)
-  with short rails top and bottom, making 4 equal panels about 13-1/4" wide.
+- **Profile.** Ask the supplier for panel (picture-frame) moulding in the same family as your crown: same maker or the same curve, about 3/4 x 2 stock. Take a 6 inch offcut of the existing crown with you so they can match the curve.
+- **Layout.** Four mitred frames, one per panel, 8 stiles and 8 rails. Each frame is 15-9/16" wide outside, with 1/4" between frames. The centre gap sits over the seam between the two 32 inch face panels, so no frame crosses it.
   Keep everything 1/2" inside the side and top edges so nothing catches on the cabinet verticals or the header as the bed swings, and start the
   bottom rail 1-1/2" up from the panel's bottom edge so it clears the 4" base moulding.
-- **Cutting and fastening.** Square cuts; rails butt between stiles. Glue and 5/8" 18 ga brads into the plywood only. Do not use anything longer than the panel is thick.
-  The strips stand 1/4" proud of the panel, which puts them 1/8" proud of the cabinet front.
-- **Handles** (5'-6' high on the kit's p.21): bars 3" either side of the centre stile, which leaves 1-3/4" to the stile.
-- **Weight.** About 4.1 lb of moulding. The kit sets the queen springs at #5 on a 1-5 scale and its instructions only describe turning the setting *down*
-  (assembly booklet p.11), so the springs have no extra power in reserve. Add the moulding **before** you balance the bed, then choose a mattress with
-  mattress + moulding at or below 80 lb (about 76 lb mattress or lighter). Keep strips thin; 3/4" solid moulding would be several times this weight.
+- **Cutting.** Mitre both ends at 45 degrees, measuring each piece to the long point (stiles 79-3/4", rails 15-9/16"). Cut all eight stiles and eight rails from one setup so the frames match, cut a spare of each, and dry-fit a frame on the panel before gluing. Check the mitres on a flat surface first.
+- **Fastening.** Glue and 1-1/4 inch 18 ga brads into the plywood panel only (no longer than 1-1/4 inch: 3/4 inch of moulding plus 1/2 inch into the 3/4 inch panel, so nothing pokes through the back). The moulding stands 3/4" proud of the panel, which puts it 5/8" proud of the cabinet front, a raised-panel look. It still passes under the header rail with 1/2" to spare.
+- **Handles** (5 to 6 feet high, kit p.21): bars 4" either side of the centre seam, inside the two middle panels, which leaves 1-5/8" to the nearest moulding.
+- **Weight.** About 12.4 lb of moulding in solid poplar (the cross-section is an estimate, so weigh a sample piece). The kit sets the queen springs at #5 on a 1-5 scale and its instructions only describe turning the setting *down*
+  (assembly booklet p.11), so the springs have no extra power in reserve. Add the moulding **before** you balance the bed, and choose a mattress that, with the moulding,
+  stays at or below 80 lb: 67 lb or lighter. If the mattress you want is heavier, thin the moulding or go back to the flat-strip option.
   Create-A-Bed's advice is to call them before modifying the bed, so this is your call to make; a quick call about the springs is cheap insurance.
 
 ## 6. Order of work

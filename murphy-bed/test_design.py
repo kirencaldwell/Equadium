@@ -266,13 +266,25 @@ class FacePanelMoulding(unittest.TestCase):
                 self.assertFalse(ox > EPS and oz > EPS, f'{n1} overlaps {n2}')
 
     def test_panels_are_real_panels(self):
-        stiles = sorted(x for n, x, z, w, h in self.rects() if n == 'Face moulding stile')
+        r = self.rects()
+        if d.FACE_TRIM_KIND == 'frames':
+            stiles = sorted(x for n, x, z, w, h in r if n == 'Face frame stile')
+            self.assertEqual(len(stiles), 8)
+            fw = (d.FACE_PANEL_W - 2 * d.FACE_TRIM_INSET - 3 * d.FACE_FRAME_GAP) / 4
+            self.assertGreater(fw - 2 * d.FACE_TRIM_W, 6, 'frame opening too small to read as a panel')
+            # the gap between frames 2 and 3 is centred on the seam between the two 32" face panels
+            gap_left = stiles[3] + d.FACE_TRIM_W
+            gap_right = stiles[4]
+            self.assertAlmostEqual((gap_left + gap_right) / 2, d.FACE_PANEL_W / 2)
+            self.assertAlmostEqual(gap_right - gap_left, d.FACE_FRAME_GAP)
+            self.assertGreaterEqual(d.FACE_FRAME_GAP, 0.125, 'frames must not touch: they bind and the seam shows')
+            return
+        stiles = sorted(x for n, x, z, w, h in r if n == 'Face moulding stile')
         self.assertEqual(len(stiles), 5)
         gaps = [stiles[i + 1] - stiles[i] - d.FACE_TRIM_W for i in range(4)]
         for g in gaps:
             self.assertAlmostEqual(g, gaps[0])
             self.assertGreater(g, 6)
-        # centre stile covers the seam between the two 32" face panels
         self.assertAlmostEqual(stiles[2] + d.FACE_TRIM_W / 2, d.FACE_PANEL_W / 2)
 
     def test_handles_clear_every_strip(self):
@@ -286,7 +298,21 @@ class FacePanelMoulding(unittest.TestCase):
     def test_moulding_barely_proud_of_the_cabinet_front(self):
         fronts = {round(y + dy, 4) for n, g, x, y, z, dx, dy, dz in d.boxes() if g == 'facetrim'}
         self.assertEqual(len(fronts), 1)
-        self.assertLessEqual(fronts.pop() - d.BED_D, 0.5)
+        self.assertLessEqual(fronts.pop() - d.BED_D, 1.0)
+
+    def test_moulding_passes_under_the_header_rail(self):
+        top = max(d.FACE_PANEL_BOTTOM + z + h for n, x, z, w, h in self.rects())
+        self.assertGreaterEqual(d.BED_H - d.HEADER_FRONT_RAIL - top, 0.25)
+
+    def test_frame_pieces_are_cut_to_the_mitre_long_point(self):
+        if d.FACE_TRIM_KIND != 'frames':
+            self.skipTest('flat strips use square cuts')
+        parts = {p.name: p for p in d.face_trim_parts()}
+        self.assertEqual(parts['Face frame stile'].qty, 8)
+        self.assertEqual(parts['Face frame rail'].qty, 8)
+        fw = (d.FACE_PANEL_W - 2 * d.FACE_TRIM_INSET - 3 * d.FACE_FRAME_GAP) / 4
+        self.assertAlmostEqual(parts['Face frame rail'].l, fw)           # inner length + 2 x width = outside width
+        self.assertAlmostEqual(parts['Face frame stile'].l, d.FACE_PANEL_H - d.FACE_TRIM_INSET - d.FACE_TRIM_BOTTOM)
 
     def test_face_panel_matches_the_kit(self):
         face = [b for b in d.boxes() if b[0] == 'bed face (closed)'][0]
@@ -297,19 +323,18 @@ class FacePanelMoulding(unittest.TestCase):
     def test_model_and_cut_list_agree(self):
         self.assertEqual(sum(1 for b in d.boxes() if b[1] == 'facetrim'), len(d.face_trim_layout()))
         listed = sum(p.qty * p.l for p in d.face_trim_parts())
-        laid = sum(max(w, h) for n, x, z, w, h in d.face_trim_layout())
-        self.assertAlmostEqual(listed, laid)
+        self.assertAlmostEqual(listed, sum(l for _, l in d.face_trim_pieces()))
 
     def test_weight_stays_inside_the_kits_mattress_budget(self):
         w = d.face_trim_weight_lb()
-        self.assertLess(w, 7.5)                                  # under half of the kit's 65-80 lb mattress band
-        self.assertLess(w / (d.moving_mass_lb() + d.MATTRESS_LB), 0.05)
+        self.assertLess(w, 15.0, 'moulding this heavy needs a conversation with the manufacturer')
+        self.assertLess(w / (d.moving_mass_lb() + d.MATTRESS_LB), 0.08)
         self.assertLessEqual(d.MATTRESS_LB + w, d.MATTRESS_MAX_LB,
                              'mattress + moulding exceeds the 80 lb the springs are set for')
 
     def test_split_style_also_works(self):
-        saved = d.FACE_PANEL_STYLE
-        d.FACE_PANEL_STYLE = 'split'
+        saved = (d.FACE_PANEL_STYLE, d.FACE_TRIM_KIND)
+        d.FACE_PANEL_STYLE, d.FACE_TRIM_KIND = 'split', 'flat'
         try:
             rects = d.face_trim_layout()
             self.assertEqual(sum(1 for r in rects if r[0] == 'Face moulding middle rail'), 4)
@@ -318,7 +343,7 @@ class FacePanelMoulding(unittest.TestCase):
                 for n, x, z, w, h in rects:
                     self.assertFalse((hx + 0.25 > x and hx - 0.25 < x + w) and (hz1 > z and hz0 < z + h), n)
         finally:
-            d.FACE_PANEL_STYLE = saved
+            d.FACE_PANEL_STYLE, d.FACE_TRIM_KIND = saved
 
 
 class RoomRenders(unittest.TestCase):

@@ -34,12 +34,12 @@ Centered layout on an 11 ft wall: towers 32-5/16" wide each, bed cabinet 65-7/8"
 | Tower back | 1/4 ply | 2 | 32-5/16" | 87-1/8" |  |
 | Scribe strip (rip to fit walls) | 3/4 ply | 2 | 3" | 87-1/8" | face-attached to outer tower sides |
 
-## Face panel moulding (full-length style, kit p.3; applied to the bed face)
+## Face panel moulding (mitred frames, one per panel; applied to the bed face)
 
 | Part | Material | Qty | Width | Length | Notes |
 |---|---|---|---|---|---|
-| Face moulding stile | solid | 5 | 2" | 79-3/4" | 1/4" thick; square cuts, glue + 18 ga brads |
-| Face moulding rail | solid | 8 | 2" | 13-1/4" | 1/4" thick; square cuts, glue + 18 ga brads |
+| Face frame stile | solid | 8 | 2" | 79-3/4" | 3/4" x 2" panel moulding, mitre both ends 45 degrees, length to the long point; glue + 1-1/4" 18 ga brads |
+| Face frame rail | solid | 8 | 2" | 15-9/16" | 3/4" x 2" panel moulding, mitre both ends 45 degrees, length to the long point; glue + 1-1/4" 18 ga brads |
 
 ## Sheet goods
 
@@ -82,7 +82,7 @@ All sheet parts (bed cabinet and towers) are packed together with a 1/8" kerf be
 
 ## Assumptions to verify
 
-- Face moulding adds about 4.1 lb (2" x 1/4" poplar strips; about 7.0 lb if MDF). Rough moving mass of the bed without mattress is ~163 lb. The kit rates a queen mattress at 65-80 lb and sets the springs at #5, the top of their 1-5 scale, so keep mattress + moulding at or below 80 lb: with this moulding, a mattress up to about 76 lb (weigh yours).
+- Face moulding (mitred frames of 3/4 x 2 profiled panel moulding) adds about 12.4 lb in solid poplar (MDF would be about 21.2 lb). Rough moving mass of the bed without mattress is ~163 lb. The kit rates a queen mattress at 65-80 lb and sets the springs at #5, the top of their 1-5 scale, so keep mattress + moulding at or below 80 lb: with this moulding the mattress should be 67 lb or lighter (weigh yours; the moulding cross-section is an estimate, weigh a sample piece).
 - Ceiling 96", measured from the HIGH point of the floor (floor is NOT level)
 - Existing crown 3-1/2" tall x 3-1/2" proud; new crown 3-1/2" tall (matches style, not measured)
 - Gap between new crown top (90-5/8") and bottom of existing crown (92-1/2") is 1-7/8" on a level floor. With a 1" floor drop the unit is set level from the HIGH end of the floor, so the gap shrinks to 7/8". Ceiling must be measured from the high point of the floor.
