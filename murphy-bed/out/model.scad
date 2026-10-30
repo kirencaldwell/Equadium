@@ -7,9 +7,35 @@ union() {
   // bed header
   translate([33.8125,0.0000,84.3750]) cube([64.3750,15.8750,2.7500]);
   // bed face (closed)
-  translate([34.3125,15.0000,2.6250]) cube([63.3750,0.7500,81.7500]);
+  translate([34.0000,15.0000,2.6250]) cube([64.0000,0.7500,81.7500]);
   // bed frame (closed)
-  translate([34.5625,9.0000,2.6250]) cube([62.8750,6.0000,81.0000]);
+  translate([34.2500,9.0000,2.6250]) cube([63.5000,6.0000,81.0000]);
+  // face moulding stile @0.50,1.50
+  translate([34.5000,15.7500,4.1250]) cube([2.0000,0.2500,79.7500]);
+  // face moulding stile @15.75,1.50
+  translate([49.7500,15.7500,4.1250]) cube([2.0000,0.2500,79.7500]);
+  // face moulding stile @31.00,1.50
+  translate([65.0000,15.7500,4.1250]) cube([2.0000,0.2500,79.7500]);
+  // face moulding stile @46.25,1.50
+  translate([80.2500,15.7500,4.1250]) cube([2.0000,0.2500,79.7500]);
+  // face moulding stile @61.50,1.50
+  translate([95.5000,15.7500,4.1250]) cube([2.0000,0.2500,79.7500]);
+  // face moulding rail @2.50,1.50
+  translate([36.5000,15.7500,4.1250]) cube([13.2500,0.2500,2.0000]);
+  // face moulding rail @2.50,79.25
+  translate([36.5000,15.7500,81.8750]) cube([13.2500,0.2500,2.0000]);
+  // face moulding rail @17.75,1.50
+  translate([51.7500,15.7500,4.1250]) cube([13.2500,0.2500,2.0000]);
+  // face moulding rail @17.75,79.25
+  translate([51.7500,15.7500,81.8750]) cube([13.2500,0.2500,2.0000]);
+  // face moulding rail @33.00,1.50
+  translate([67.0000,15.7500,4.1250]) cube([13.2500,0.2500,2.0000]);
+  // face moulding rail @33.00,79.25
+  translate([67.0000,15.7500,81.8750]) cube([13.2500,0.2500,2.0000]);
+  // face moulding rail @48.25,1.50
+  translate([82.2500,15.7500,4.1250]) cube([13.2500,0.2500,2.0000]);
+  // face moulding rail @48.25,79.25
+  translate([82.2500,15.7500,81.8750]) cube([13.2500,0.2500,2.0000]);
   // tower side out L
   translate([0.7500,0.2500,0.0000]) cube([0.7500,14.8750,87.1250]);
   // tower side in L

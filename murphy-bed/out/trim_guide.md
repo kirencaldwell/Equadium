@@ -48,10 +48,19 @@ vertical **and** each tower side: **4-5/8" tall x 5/8" deep**. For the 1/4" towe
 - Iron slowly at medium-high heat, press with a block, trim the overhang with a banding trimmer or sharp chisel,
   and lightly sand the edge flush. Do the end grain first, then the long edges.
 
-## 5. Face-panel moulding (optional, kit p.3)
+## 5. Face-panel moulding (full-length style, kit p.3)
 
-The kit's "full-length" and "split" panel mouldings add weight to the face panel. The gas springs are balanced for
-the plain panel, so call Create-A-Bed (1-877-966-3852) before adding any.
+- **Layout.** Flat 2" x 1/4" strips on the two 32" face panels: 5 full-height stiles (the centre one covers the seam between the panels)
+  with short rails top and bottom, making 4 equal panels about 13-1/4" wide.
+  Keep everything 1/2" inside the side and top edges so nothing catches on the cabinet verticals or the header as the bed swings, and start the
+  bottom rail 1-1/2" up from the panel's bottom edge so it clears the 4" base moulding.
+- **Cutting and fastening.** Square cuts; rails butt between stiles. Glue and 5/8" 18 ga brads into the plywood only. Do not use anything longer than the panel is thick.
+  The strips stand 1/4" proud of the panel, which puts them 1/8" proud of the cabinet front.
+- **Handles** (5'-6' high on the kit's p.21): bars 3" either side of the centre stile, which leaves 1-3/4" to the stile.
+- **Weight.** About 4.1 lb of moulding. The kit sets the queen springs at #5 on a 1-5 scale and its instructions only describe turning the setting *down*
+  (assembly booklet p.11), so the springs have no extra power in reserve. Add the moulding **before** you balance the bed, then choose a mattress with
+  mattress + moulding at or below 80 lb (about 76 lb mattress or lighter). Keep strips thin; 3/4" solid moulding would be several times this weight.
+  Create-A-Bed's advice is to call them before modifying the bed, so this is your call to make; a quick call about the springs is cheap insurance.
 
 ## 6. Order of work
 

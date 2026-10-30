@@ -240,6 +240,86 @@ class SheetLayouts(unittest.TestCase):
             self.assertGreater(need / have, 0.40, 'suspiciously wasteful layout')
 
 
+class FacePanelMoulding(unittest.TestCase):
+    def rects(self):
+        return d.face_trim_layout()
+
+    def test_strips_stay_inside_the_panel_with_clearance(self):
+        min_inset = 0.25     # absolute: nothing may sit closer than 1/4" to a panel edge
+        self.assertGreaterEqual(d.FACE_TRIM_INSET, min_inset)
+        for n, x, z, w, h in self.rects():
+            self.assertGreaterEqual(x, min_inset - EPS, n)
+            self.assertLessEqual(x + w, d.FACE_PANEL_W - min_inset + EPS, n)
+            self.assertLessEqual(z + h, d.FACE_PANEL_H - min_inset + EPS, n)
+
+    def test_strips_clear_the_base_moulding(self):
+        lowest = min(d.FACE_PANEL_BOTTOM + z for n, x, z, w, h in self.rects())
+        self.assertGreaterEqual(lowest, d.BASE_H + 0.125 - EPS)
+
+    def test_strips_do_not_overlap_each_other(self):
+        r = self.rects()
+        for i, (n1, x1, z1, w1, h1) in enumerate(r):
+            for n2, x2, z2, w2, h2 in r[i + 1:]:
+                ox = min(x1 + w1, x2 + w2) - max(x1, x2)
+                oz = min(z1 + h1, z2 + h2) - max(z1, z2)
+                self.assertFalse(ox > EPS and oz > EPS, f'{n1} overlaps {n2}')
+
+    def test_panels_are_real_panels(self):
+        stiles = sorted(x for n, x, z, w, h in self.rects() if n == 'Face moulding stile')
+        self.assertEqual(len(stiles), 5)
+        gaps = [stiles[i + 1] - stiles[i] - d.FACE_TRIM_W for i in range(4)]
+        for g in gaps:
+            self.assertAlmostEqual(g, gaps[0])
+            self.assertGreater(g, 6)
+        # centre stile covers the seam between the two 32" face panels
+        self.assertAlmostEqual(stiles[2] + d.FACE_TRIM_W / 2, d.FACE_PANEL_W / 2)
+
+    def test_handles_clear_every_strip(self):
+        for hx in (d.FACE_PANEL_W / 2 - d.HANDLE_OFFSET, d.FACE_PANEL_W / 2 + d.HANDLE_OFFSET):
+            hz0, hz1 = (z - d.FACE_PANEL_BOTTOM for z in d.HANDLE_Z)
+            for n, x, z, w, h in self.rects():
+                hit = (hx + 0.25 > x and hx - 0.25 < x + w) and (hz1 > z and hz0 < z + h)
+                self.assertFalse(hit, f'handle at {hx} hits {n}')
+        self.assertTrue(60 <= d.HANDLE_Z[0] and d.HANDLE_Z[1] <= 72)     # kit: 5'-6' (plans p.21)
+
+    def test_moulding_barely_proud_of_the_cabinet_front(self):
+        fronts = {round(y + dy, 4) for n, g, x, y, z, dx, dy, dz in d.boxes() if g == 'facetrim'}
+        self.assertEqual(len(fronts), 1)
+        self.assertLessEqual(fronts.pop() - d.BED_D, 0.5)
+
+    def test_face_panel_matches_the_kit(self):
+        face = [b for b in d.boxes() if b[0] == 'bed face (closed)'][0]
+        self.assertAlmostEqual(face[5], 2 * by_name(d.bed_parts())['E Bed face panel'].w)
+        inner = d.BED_W - 2 * d.T
+        self.assertAlmostEqual(face[2] - (d.SCRIBE + d.TOWER_W + d.T), (inner - face[5]) / 2)   # centered in the opening
+
+    def test_model_and_cut_list_agree(self):
+        self.assertEqual(sum(1 for b in d.boxes() if b[1] == 'facetrim'), len(d.face_trim_layout()))
+        listed = sum(p.qty * p.l for p in d.face_trim_parts())
+        laid = sum(max(w, h) for n, x, z, w, h in d.face_trim_layout())
+        self.assertAlmostEqual(listed, laid)
+
+    def test_weight_stays_inside_the_kits_mattress_budget(self):
+        w = d.face_trim_weight_lb()
+        self.assertLess(w, 7.5)                                  # under half of the kit's 65-80 lb mattress band
+        self.assertLess(w / (d.moving_mass_lb() + d.MATTRESS_LB), 0.05)
+        self.assertLessEqual(d.MATTRESS_LB + w, d.MATTRESS_MAX_LB,
+                             'mattress + moulding exceeds the 80 lb the springs are set for')
+
+    def test_split_style_also_works(self):
+        saved = d.FACE_PANEL_STYLE
+        d.FACE_PANEL_STYLE = 'split'
+        try:
+            rects = d.face_trim_layout()
+            self.assertEqual(sum(1 for r in rects if r[0] == 'Face moulding middle rail'), 4)
+            for hx in (d.FACE_PANEL_W / 2 - d.HANDLE_OFFSET, d.FACE_PANEL_W / 2 + d.HANDLE_OFFSET):
+                hz0, hz1 = (z - d.FACE_PANEL_BOTTOM for z in d.HANDLE_Z)
+                for n, x, z, w, h in rects:
+                    self.assertFalse((hx + 0.25 > x and hx - 0.25 < x + w) and (hz1 > z and hz0 < z + h), n)
+        finally:
+            d.FACE_PANEL_STYLE = saved
+
+
 class ReportsAndDrawings(unittest.TestCase):
     def test_reports_and_drawings_generate(self):
         with tempfile.TemporaryDirectory() as t:
