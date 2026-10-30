@@ -14,6 +14,7 @@ from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import design as d
+import render_room as rr
 
 EPS = 1e-6
 
@@ -318,6 +319,33 @@ class FacePanelMoulding(unittest.TestCase):
                     self.assertFalse((hx + 0.25 > x and hx - 0.25 < x + w) and (hz1 > z and hz0 < z + h), n)
         finally:
             d.FACE_PANEL_STYLE = saved
+
+
+class RoomRenders(unittest.TestCase):
+    def test_closed_view_has_every_moulding_strip_on_the_face(self):
+        decals = [s for s in rr.scene(open_bed=False) if s[3]]
+        self.assertEqual(len(decals), len(d.face_trim_layout()))
+        face = [b for b in d.boxes() if b[0] == 'bed face (closed)'][0]
+        for name, (x, y, z, dx, dy, dz), col, _ in decals:
+            self.assertAlmostEqual(y, face[3] + face[6])             # sits on the panel's front, not on the wall
+            self.assertGreaterEqual(x, face[2] - EPS)
+            self.assertLessEqual(x + dx, face[2] + face[5] + EPS)
+
+    def test_open_view_has_no_moulding_stuck_on_the_wall(self):
+        solids = rr.scene(open_bed=True)
+        self.assertFalse([s for s in solids if s[3]], 'closed-position strips must not appear when the bed is open')
+        self.assertFalse([s for s in solids if s[0].startswith('face moulding')])
+        panel = [s for s in solids if s[0] == 'face panel (underside)'][0][1]
+        self.assertAlmostEqual(panel[1] + panel[4], d.BED_OPEN_PROJ)   # foot end at the 87" projection
+        self.assertAlmostEqual(panel[4], d.FACE_PANEL_H)
+
+    def test_renders_write_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, open_bed in (('closed.png', False), ('open.png', True)):
+                rr.render(open_bed, os.path.join(tmp, name))
+                self.assertGreater(os.path.getsize(os.path.join(tmp, name)), 5000)
+            rr.draw_open_face(os.path.join(tmp, 'face.png'))
+            self.assertGreater(os.path.getsize(os.path.join(tmp, 'face.png')), 5000)
 
 
 class ReportsAndDrawings(unittest.TestCase):
