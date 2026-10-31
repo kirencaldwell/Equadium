@@ -18,6 +18,19 @@ the Continue list. (The engine's `human_vs_human` mode still exists because onli
 Other endpoints: `GET /modes`, `GET /games/{id}`, `POST /games/{id}/validate_move` (returns a `reason` when illegal).
 A rejected `play` returns `{"status": "failed", "error": "..."}` and does not consume the turn.
 
+## Game configs and the beta
+
+`core/configs.py` is a registry of named rule sets. `standard` is the live game (`core/game_config.py`); every other entry in
+`core/beta_configs.json` is a **beta**: overrides merged onto the standard config (tile counts, points, multipliers, the equals
+pile, rack size, the +C rule, turn limit, stall rule; new tile symbols and board size are rejected until the engine supports them).
+
+- `GET /configs` lists them. `POST /rooms {"config": "beta-small-rack", "bot": true}` opens an online room on that config,
+  optionally with a bot opponent; `POST /rooms/{code}/bot` seats a bot in a room still waiting. The config id is saved with the game,
+  shown as a BETA tag in the UI, and beta games never count toward stats (analytics records carry `config_id`).
+- `python -m core.beta_playtest <id> --games 20 --workers 4` plays bot-vs-bot on the config and compares it with `standard`
+  (scores, game length, how often a bot is stuck swapping, first-player advantage). `python -m core.stress_test --config <id>` runs the invariant checks.
+- Bots take the config they are given (`SearchAgent(name, config)`), so any registered config is playable by them.
+
 ## Running the app
 
 ```

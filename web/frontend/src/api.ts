@@ -60,7 +60,7 @@ const authed = (token: string, init: RequestInit = {}): RequestInit => ({
 });
 
 export const room = {
-    create: (name: string) => call<RoomJoin>('/rooms', json({ name })),
+    create: (name: string, config = 'standard', bot = false) => call<RoomJoin>('/rooms', json({ name, config, bot })),
     join: (code: string, name: string, token = '') =>
         call<RoomJoin>(`/rooms/${encodeURIComponent(code)}/join`, authed(token, json({ name }))),
     state: (code: string, token: string, since?: number) =>
@@ -116,3 +116,5 @@ export const api = {
     remove: (id: string) => call<{ deleted: boolean }>(`/games/${id}`, { method: 'DELETE' }),
     agentStep: (id: string) => call<{ game_over: boolean }>(`/games/${id}/agent_step`, { method: 'POST' }),
 };
+
+export const configs = () => call<{ configs: import('./types').ConfigInfo[] }>('/configs');

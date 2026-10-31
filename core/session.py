@@ -19,6 +19,7 @@ from typing import Dict, List, Optional
 from core.ai_agent import AIAgent
 from core.search_agent import SearchAgent
 from core.game_config import CONFIG
+from core.configs import STANDARD_ID, get_config
 from core.game_entities import Move
 from core.game_manager import EquadiumGame
 from core.math_playbook import MathPlaybook
@@ -76,8 +77,10 @@ class TurnRecord:
 class GameSession:
     def __init__(self, mode: str = "human_vs_agent", config: dict = CONFIG,
                  playbook: Optional[MathPlaybook] = None, verbose: bool = False,
-                 agent_types: Optional[List[str]] = None):
+                 agent_types: Optional[List[str]] = None, config_id: str = STANDARD_ID):
         """
+        config_id: the registered config (core/configs.py) that `config` came from. It is saved with the game
+        so a resumed game plays under the same rules.
         agent_types: which algorithm drives each agent seat, in seat order.
         "search" (default) searches from the rack each turn; "playbook" is the
         original precomputed-table agent, kept as a baseline.
@@ -86,6 +89,7 @@ class GameSession:
             raise ValueError(f"Unknown mode '{mode}'. Choose from: {', '.join(MODES)}")
         self.mode = mode
         self.config = config
+        self.config_id = config_id
         self.playbook = playbook
         self.game = EquadiumGame([n for n, _ in MODES[mode]], config, verbose=verbose)
         self.seats: Dict[str, Seat] = {}
@@ -106,6 +110,7 @@ class GameSession:
         """Everything needed to resume this game later (JSON-serialisable)."""
         return {
             "v": 1,
+            "config_id": self.config_id,
             "mode": self.mode,
             "seats": [{"name": s.name, "kind": s.kind, "agent_type": s.agent_type} for s in self.seats.values()],
             "game": self.game.to_dict(),
@@ -114,9 +119,12 @@ class GameSession:
         }
 
     @classmethod
-    def from_dict(cls, d: dict, config: dict = CONFIG, playbook: Optional[MathPlaybook] = None) -> "GameSession":
+    def from_dict(cls, d: dict, config: Optional[dict] = None, playbook: Optional[MathPlaybook] = None) -> "GameSession":
         session = cls.__new__(cls)
         session.mode = d["mode"]
+        session.config_id = d.get("config_id", STANDARD_ID)   # games saved before configs existed are standard
+        if config is None:
+            config = get_config(session.config_id)
         session.config = config
         session.playbook = playbook
         session.game = EquadiumGame.from_dict(d["game"], config)
@@ -161,6 +169,13 @@ class GameSession:
         self.seats[new_name] = Seat(new_name, HUMAN)
         if len(self.human_seats()) == len(self.seats):
             self.mode = "human_vs_human"
+
+    def make_seat_agent(self, seat_name: str, agent_type: str = "search") -> None:
+        """Put a bot in a seat (e.g. a bot joining an online room)."""
+        if seat_name not in self.seats:
+            raise KeyError(f"No such player '{seat_name}'")
+        agent = make_agent(agent_type, seat_name, self.config, self.playbook)
+        self.seats[seat_name] = Seat(seat_name, AGENT, agent, agent_type)
 
     # ------------------------------------------------------------------
     # Human actions. Each returns a TurnRecord and then lets any agent

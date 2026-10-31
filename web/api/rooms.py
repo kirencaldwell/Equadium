@@ -19,7 +19,7 @@ from typing import Dict, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
-from core.game_config import CONFIG
+from core.configs import ConfigError, STANDARD_ID, describe, get_config
 from core.session import GameSession
 from web.api.models import MoveModel, SwapModel
 from web.api import persistence, push
@@ -92,6 +92,22 @@ class NameModel(BaseModel):
     name: Optional[str] = None
 
 
+class CreateRoomModel(NameModel):
+    config: str = STANDARD_ID     # a registered config id (GET /configs); anything but "standard" is a beta
+    bot: bool = False             # seat a bot as the opponent right away
+
+
+BOT_LABEL = "Bot"
+
+
+def _seat_bot(room: Room, seat: str) -> None:
+    """Fill `seat` with a search bot. Nobody holds its token, so only the server ever plays for it."""
+    room.session.make_seat_agent(seat, "search")
+    room.tokens[seat] = secrets.token_urlsafe(24)
+    room.labels[seat] = BOT_LABEL
+    room.session.advance_agents()   # the bot may have the first move
+
+
 def _clean_name(name: Optional[str], fallback: str) -> str:
     name = " ".join((name or "").split())[:MAX_NAME]
     return name or fallback
@@ -156,6 +172,7 @@ def _snapshot(room: Room, seat: Optional[str]) -> dict:
     state["board"] = state["board"].model_dump()
     state["labels"] = dict(room.labels)
     state["joined"] = room.full
+    state["config"] = describe(room.session.config_id)
     # The other player asking to be let back into their seat (shown to whoever still holds a seat).
     state["reclaim_requests"] = [{"id": r["id"], "seat": r["seat"], "label": room.labels.get(r["seat"], r["seat"])}
                                  for r in room.pending_reclaims() if r["seat"] != seat]
@@ -188,23 +205,45 @@ def _new_code() -> str:
 
 
 @router.post("")
-def create_room(body: Optional[NameModel] = None, user: Optional[AuthUser] = Depends(optional_user)):
+def create_room(body: Optional[CreateRoomModel] = None, user: Optional[AuthUser] = Depends(optional_user)):
+    config_id = body.config if body else STANDARD_ID
+    try:
+        config = get_config(config_id)
+    except ConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     with _rooms_lock:
         _sweep()
         if len(_rooms) >= MAX_ROOMS:
             raise HTTPException(status_code=503, detail="The server is full right now, try again later")
         code = _new_code()
-        room = Room(code=code, session=GameSession("human_vs_human", CONFIG))
+        room = Room(code=code, session=GameSession("human_vs_human", config, config_id=config_id))
         # Seat order decides who moves first, so give the host a random seat.
         seat = secrets.choice(SEATS)
         room.tokens[seat] = secrets.token_urlsafe(24)
         room.labels[seat] = _clean_name((body.name if body else None) or (user.name if user else None), "Player")
         if user:
             room.seat_users[seat] = user.id
+        if body and body.bot:
+            _seat_bot(room, next(s for s in SEATS if s != seat))
         room.touch()
         _rooms[code] = room
     _save_room(room)
-    return {"code": code, "seat": seat, "token": room.tokens[seat]}
+    return {"code": code, "seat": seat, "token": room.tokens[seat], "config": config_id}
+
+
+@router.post("/{code}/bot")
+def add_bot(code: str, x_player_token: Optional[str] = Header(None),
+            user: Optional[AuthUser] = Depends(optional_user)):
+    """Let a bot take the open seat of a game still waiting for its second player."""
+    room = _get_room(code)
+    _require_seat(room, x_player_token, user)
+    with room.lock:
+        if room.closed or room.full:
+            raise HTTPException(status_code=409, detail="This game has no open seat")
+        _seat_bot(room, next(s for s in SEATS if s not in room.tokens))
+        room.touch()
+        _save_room(room)
+    return {"code": room.code, "bot": True}
 
 
 @router.post("/{code}/join")
@@ -368,6 +407,7 @@ def _act(room: Room, token: Optional[str], user: Optional[AuthUser], fn):
         except (ValueError, KeyError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         if record.ok:
+            room.session.advance_agents()   # a bot opponent answers straight away
             room.touch()
             _save_room(room)
             push.notify_room_move(room, seat, record)   # tell the other player (fire and forget)

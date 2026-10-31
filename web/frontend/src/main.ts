@@ -11,14 +11,14 @@ import '@fontsource/stix-two-text/latin-400-italic.css';
 import '@fontsource/stix-two-text/latin-600.css';
 import '@fontsource/stix-two-text/latin-600-italic.css';
 import { inject } from '@vercel/analytics';
-import { api, me, push as pushApi, room } from './api';
+import { api, configs, me, push as pushApi, room } from './api';
 import { ico } from './icons';
 import { authAvailable, initAuth, signInWithGoogle, signOut, takePendingRoom, type User } from './auth';
 import { report } from './diag';
 import { equation, equationFromTiles, math, tileHtml } from './tiles';
 import { autoEnablePush, disablePush, enablePush, IOS_HINT, onNotificationOpen, pausePush, pushStatus, syncPush, type PushStatus } from './push';
 import { currentState, parseHash, pushModal, pushRoute, replaceRoute, sameRoute, type Route } from './nav';
-import type { GameState, Mode, Placed, Preview, SavedGame, Stats, Tile } from './types';
+import type { ConfigInfo, GameState, Mode, Placed, Preview, SavedGame, Stats, Tile } from './types';
 
 // ─────────────────────────────────────────────
 // State
@@ -617,9 +617,14 @@ async function enterRoom(seat: OnlineSeat, push = true) {
     if (!S.game.game_over) startPolling();
 }
 
-async function createOnline() {
+// Rulesets offered on the online screen: the standard game plus any betas the server lists.
+let rulesets: ConfigInfo[] = [];
+void configs().then(r => { rulesets = r.configs; }).catch(() => { /* no betas offered; standard still works */ });
+
+async function createOnline(bot = false) {
     const name = readName();
-    try { await enterRoom(await room.create(name)); } catch (e) { showToast((e as Error).message); }
+    const config = (document.getElementById('ruleset') as HTMLSelectElement | null)?.value || 'standard';
+    try { await enterRoom(await room.create(name, config, bot)); } catch (e) { showToast((e as Error).message); }
 }
 
 async function joinOnline(code: string) {
@@ -996,10 +1001,17 @@ function onlineHtml(): string {
         <h2 class="online-title">Play a friend online</h2>
         <label class="field"><span>Your name</span>
             <input id="name" maxlength="16" autocomplete="nickname" placeholder="Player" value="${(savedName() || S.user?.name || '').replace(/"/g, '&quot;')}"></label>
+        ${rulesets.length > 1 ? `<label class="field"><span>Rules</span>
+            <select id="ruleset">${rulesets.map(c => `<option value="${c.id}">${c.beta ? 'Beta: ' : ''}${c.name}</option>`).join('')}</select></label>` : ''}
         <div class="modes">
             <button class="mode-card" data-act="online-create">
                 <span class="mode-icon">${ico('plus')}</span>
                 <span class="mode-text"><strong>Start a new game</strong><small>Get a code to send to a friend.</small></span>
+                <span class="chev">${ico('chevron-right')}</span>
+            </button>
+            <button class="mode-card" data-act="online-bot">
+                <span class="mode-icon">${ico('plus')}</span>
+                <span class="mode-text"><strong>Play a bot online</strong><small>Same rules as the game above, no friend needed.</small></span>
                 <span class="chev">${ico('chevron-right')}</span>
             </button>
         </div>
@@ -1040,7 +1052,7 @@ function scoreboardHtml(g: GameState): string {
             <span class="who">${display(p.name)}${bot ? ' <i>bot</i>' : ''}</span>
             <span class="pts">${p.score}</span>
         </div>`;
-    }).join('')}<div class="bag"><strong>${g.bag_count}</strong><span>in bag</span></div></div>`;
+    }).join('')}${g.config?.beta ? `<div class="bag" title="${g.config.description.replace(/"/g, '&quot;')}"><strong>BETA</strong><span>${g.config.name}</span></div>` : ''}<div class="bag"><strong>${g.bag_count}</strong><span>in bag</span></div></div>`;
 }
 
 function statusText(g: GameState): string {
@@ -1488,6 +1500,7 @@ app.addEventListener('click', (e) => {
             case 'start': void startGame((actEl.dataset.mode as Mode)); break;
             case 'online': showOnline(); break;
             case 'online-create': offerPush(); void createOnline(); break;
+            case 'online-bot': void createOnline(true); break;
             case 'online-join': offerPush(); void joinOnline((document.getElementById('code') as HTMLInputElement).value); break;
             case 'online-resume': { const saved = loadSaved(); if (saved) void enterRoom(saved).catch(err => showToast((err as Error).message)); break; }
             case 'copy-link':
