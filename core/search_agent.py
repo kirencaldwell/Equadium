@@ -37,6 +37,7 @@ from typing import Dict, List, Optional, Tuple
 
 import sympy as sp
 
+from core.bot_policy import BotPolicy
 from core.game_entities import Move, make_tile
 
 logger = logging.getLogger("equadium.search_agent")
@@ -207,7 +208,8 @@ class Candidate:
 class SearchAgent:
     def __init__(self, name, config, max_len: int = 5, max_inner: int = 2,
                  max_verify: int = 30, node_budget: int = 150_000, time_budget: Optional[float] = None,
-                 max_candidates: int = 4000, verbose: bool = False):
+                 max_candidates: int = 4000, verbose: bool = False,
+                 policy: Optional[BotPolicy] = None):
         """
         max_len    : longest rack expression (in tiles) the pool will contain
         max_inner  : longest expression combined with an anchor (anchor + A)
@@ -217,6 +219,7 @@ class SearchAgent:
                      is spent the agent stops deepening, skips uncached SymPy work and stops verifying more
                      candidates: a slow host gets slightly weaker moves instead of long waits.
         max_candidates: stop collecting once this many plays are found (best are verified)
+        policy     : tunable preferences (see core/bot_policy.py); None = the neutral, untuned bot
         """
         self.name = name
         self.config = config
@@ -228,6 +231,7 @@ class SearchAgent:
         self._deadline = float("inf")
         self.max_candidates = max_candidates
         self.verbose = verbose
+        self.policy = policy or BotPolicy()
 
         self.value_tiles = {s: _tile_value(s) for s in config["tiles"] if _tile_value(s) is not None}
         self.points = {s: d["points"] for s, d in config["tiles"].items()}
@@ -260,7 +264,7 @@ class SearchAgent:
         surplus = []
         for t in player.rack:
             seen[t.symbol] += 1
-            if seen[t.symbol] > self._KEEP_AT_MOST.get(t.symbol, 2):
+            if seen[t.symbol] > self.policy.swap_keep.get(t.symbol, self._KEEP_AT_MOST.get(t.symbol, 2)):
                 surplus.append(t)
         if surplus:
             return surplus
@@ -473,13 +477,16 @@ class SearchAgent:
 
         return scan(-1), scan(1)
 
-    def _estimate_score(self, tokens, anchor_idx) -> int:
-        pts, boosts = 0, 0
+    def _estimate_score(self, tokens, anchor_idx) -> float:
+        pts, boosts, leave = 0, 0, 0.0
+        pol = self.policy
         for i, s in enumerate(tokens):
             pts += self.points.get(s, 0)
-            if i != anchor_idx and self.mult.get(s, 1) > 1:
-                boosts += self.mult[s]
-        return pts * (boosts or 1)
+            if i != anchor_idx:
+                leave += pol.play_bonus - pol.keep_value.get(s, 0.0)  # tiles actually taken from the rack
+                if self.mult.get(s, 1) > 1:
+                    boosts += self.mult[s]
+        return pts * (boosts or 1) + leave
 
     def find_best_move(self, game) -> Optional[Move]:
         self._deadline = time.monotonic() + self.time_budget
