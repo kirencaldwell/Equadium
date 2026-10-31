@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from core.ai_agent import AIAgent
+from core.bot_policy import load_policy
 from core.search_agent import SearchAgent
 from core.game_config import CONFIG
 from core.game_entities import Move
@@ -47,7 +48,7 @@ def get_playbook(config: dict = CONFIG, max_length: Optional[int] = None) -> Mat
 
 def make_agent(agent_type: str, name: str, config: dict, playbook: Optional[MathPlaybook] = None):
     if agent_type == "search":
-        return SearchAgent(name, config)
+        return SearchAgent(name, config, policy=load_policy(config))
     if agent_type == "playbook":
         return AIAgent(name, playbook or get_playbook(config), config, verbose=False)
     raise ValueError(f"Unknown agent type '{agent_type}' (use 'search' or 'playbook')")

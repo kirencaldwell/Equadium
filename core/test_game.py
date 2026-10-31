@@ -680,3 +680,26 @@ def test_search_agent_plays_the_imaginary_unit():
     assert any(t.symbol == "i" for _, _, t in move.tiles_to_play)
     _, err = s.game.evaluate_play(move.tiles_to_play, move.direction)
     assert err is None
+
+
+# ---------------------------------------------------------------------------
+# Per-config bot policies
+# ---------------------------------------------------------------------------
+def test_policy_round_trips_and_is_keyed_by_config(tmp_path):
+    from core.bot_policy import BotPolicy, config_id, load_policy, save_policy
+    pol = BotPolicy(play_bonus=1.5, keep_value={"C": 2.0}, swap_keep={"x": 3})
+    save_policy(CONFIG, pol, directory=str(tmp_path))
+    assert load_policy(CONFIG, directory=str(tmp_path)).to_dict() == pol.to_dict()
+    other = copy.deepcopy(CONFIG)
+    other["tiles"]["x"]["count"] += 1
+    assert config_id(other) != config_id(CONFIG)
+    assert load_policy(other, directory=str(tmp_path)).to_dict() == BotPolicy().to_dict()  # untrained config: neutral
+
+
+def test_policy_changes_move_ranking_only_through_tiles_played():
+    from core.bot_policy import BotPolicy
+    neutral = SearchAgent("n", CONFIG)
+    tuned = SearchAgent("t", CONFIG, policy=BotPolicy(play_bonus=1.0, keep_value={"C": 5.0}))
+    tokens = ["x", "+", "C", "=", "x", "+", "C"]
+    assert neutral._estimate_score(tokens, 0) == tuned._estimate_score(tokens, 0) - 6 * 1.0 + 2 * 5.0
+    assert SearchAgent("d", CONFIG).policy.to_dict() == BotPolicy().to_dict()

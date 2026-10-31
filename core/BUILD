@@ -36,10 +36,17 @@ py_library(
 )
 
 py_library(
+    name = "bot_policy",
+    srcs = ["bot_policy.py"],
+    data = glob(["bot_policies/*.json"]),
+)
+
+py_library(
     name = "search_agent",
     srcs = ["search_agent.py"],
     data = ["search_cache.json"],
     deps = [
+        ":bot_policy",
         ":game_entities",
         requirement("sympy"),
     ],
@@ -51,6 +58,7 @@ py_library(
     deps = [
         ":ai_agent",
         ":search_agent",
+        ":bot_policy",
         ":game_manager",
         ":game_config",
         ":math_playbook",
@@ -130,3 +138,14 @@ py_binary(
     ],
 )
 
+
+py_binary(
+    name = "train_bot",
+    srcs = ["train_bot.py"],
+    deps = [
+        ":bot_policy",
+        ":session",
+        ":search_agent",
+        ":game_config",
+    ],
+)
