@@ -4,6 +4,7 @@ from core.game_config import CONFIG
 from core.game_entities import make_tile
 from web.api.main import app
 from web.api import rooms
+from web.api.store import MemoryStore, set_store
 
 client = TestClient(app)
 CR, CC = CONFIG["board_dimensions"][0] // 2, CONFIG["board_dimensions"][1] // 2
@@ -169,3 +170,48 @@ def test_reclaim_is_refused_for_players_who_already_have_a_seat():
     waiting = client.post("/rooms", json={"name": "Solo"}).json()
     assert client.post(f"/rooms/{waiting['code']}/reclaim", json={"seat": "Player1"}).status_code == 409   # open seat: just join
     assert client.post(f"/rooms/{code}/reclaim", json={"seat": "Nope"}).status_code == 400
+
+
+# ---- beta configs and bot opponents ----
+def test_configs_endpoint_lists_standard_and_betas():
+    configs = client.get("/configs").json()["configs"]
+    assert configs[0]["id"] == "standard" and not configs[0]["beta"]
+    assert any(c["beta"] for c in configs)
+
+
+def test_room_on_a_beta_config_uses_its_rules_and_unknown_ids_400():
+    assert client.post("/rooms", json={"config": "nope"}).status_code == 400
+    host = client.post("/rooms", json={"name": "Ada", "config": "beta-small-rack"}).json()
+    client.post(f"/rooms/{host['code']}/join", json={"name": "Bo"})
+    st = state(host["code"], host)["state"]
+    assert st["config"]["id"] == "beta-small-rack" and st["config"]["beta"]
+    assert all(len([t for t in p["rack"] if t["symbol"] != "="]) <= 12 for p in st["players"] if p["rack"])
+
+
+def test_bot_room_plays_back_and_survives_a_reload():
+    set_store(MemoryStore())
+    try:
+        _bot_room_reload()
+    finally:
+        set_store(None)
+
+
+def _bot_room_reload():
+    host = client.post("/rooms", json={"name": "Ada", "config": "beta-short-game", "bot": True}).json()
+    st = state(host["code"], host)["state"]
+    assert st["joined"] and st["seats"][[s for s in st["seats"] if s != host["seat"]][0]] == "agent"
+    # whoever is to move, after our pass the bot has answered and it is our turn again
+    if st["current_player"] == host["seat"]:
+        assert client.post(f"/rooms/{host['code']}/pass", headers=hdr(host["token"])).json()["status"] == "success"
+    st = state(host["code"], host)["state"]
+    assert st["current_player"] == host["seat"] and st["turns_played"] >= 1
+    rooms._rooms.pop(host["code"])   # force a rebuild from the store
+    st2 = state(host["code"], host)["state"]
+    assert st2["config"]["id"] == "beta-short-game" and st2["turns_played"] == st["turns_played"]
+
+
+def test_bot_can_be_added_to_a_waiting_room_once():
+    host = client.post("/rooms", json={"name": "Ada"}).json()
+    assert client.post(f"/rooms/{host['code']}/bot", headers=hdr(host["token"])).status_code == 200
+    assert client.post(f"/rooms/{host['code']}/bot", headers=hdr(host["token"])).status_code == 409
+    assert client.post(f"/rooms/{host['code']}/join").status_code == 409

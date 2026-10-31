@@ -13,7 +13,10 @@ logger = logging.getLogger("equadium_store")
 
 # Only games where the signed-in player's result means something count toward stats:
 # solo vs the computer, and online rooms.
-def counts_for_stats(kind: str, mode: str) -> bool:
+# Games on a beta config (core/configs.py) are experiments and never count.
+def counts_for_stats(kind: str, mode: str, config_id: str = "standard") -> bool:
+    if config_id != "standard":
+        return False
     return kind == "room" or (kind == "solo" and mode == "human_vs_agent")
 
 
@@ -82,6 +85,7 @@ def analytics_record(game_id: str, kind: str, session: GameSession) -> dict:
     seats = [s.name for s in g.players]
     return {
         "game_id": game_id, "kind": kind, "mode": session.mode, "finished_at": now_iso(),
+        "config_id": session.config_id,
         "end_reason": g.end_reason, "forfeited": g.forfeited_by is not None, "turns": g.turns_played,
         "players": [{"seat": i, "kind": session.seats[name].kind, "score": g.players[i].score,
                      "winner": name in g.winners} for i, name in enumerate(seats)],
@@ -112,7 +116,7 @@ def finalize_if_over(game_id: str, kind: str, session: GameSession, seat_users: 
         return
     store = get_store()
     try:
-        if counts_for_stats(kind, session.mode):
+        if counts_for_stats(kind, session.mode, session.config_id):
             store.save_results(result_rows(game_id, kind, session, seat_users))
     except Exception:
         logger.exception("Could not record results for game %s", game_id)

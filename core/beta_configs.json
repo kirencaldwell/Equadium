@@ -1,0 +1,26 @@
+[
+  {
+    "id": "beta-short-game",
+    "name": "Short game",
+    "description": "Ends after 40 turns instead of 75.",
+    "overrides": {"max_turns": 40}
+  },
+  {
+    "id": "beta-small-rack",
+    "name": "Small rack",
+    "description": "Hold 12 tiles instead of 16: fewer options each turn.",
+    "overrides": {"max_rack_size": 12}
+  },
+  {
+    "id": "beta-no-plus-c",
+    "name": "No +C rule",
+    "description": "Integrals don't need a +C on the other side.",
+    "overrides": {"require_plus_c": false}
+  },
+  {
+    "id": "beta-calculus-heavy",
+    "name": "Calculus heavy",
+    "description": "More d/dx and integral tiles, fewer plain powers.",
+    "overrides": {"tiles": {"d/dx(": {"count": 8}, "int(": {"count": 8}, "x**3": {"count": 2}, "x**4": {"count": 2}}}
+  }
+]

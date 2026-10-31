@@ -32,19 +32,25 @@ from concurrent.futures import ProcessPoolExecutor
 from typing import List, Optional
 
 from core.game_config import CONFIG
+from core.configs import get_config
 from core.session import GameSession
 
 _worker_playbook = None
 _worker_agent_types = ["search", "search"]
+_worker_config = None   # None: the live CONFIG (read at call time, because tune_tiles edits it in place)
+_worker_config_id = "standard"
 
 
-def _init_worker(playbook_length: int, agent_types):
-    """Per-process setup. The (slow) playbook is only built if a playbook agent is requested."""
-    global _worker_playbook, _worker_agent_types
+def _init_worker(playbook_length: int, agent_types, config_id: str = "standard"):
+    """Per-process setup. The (slow) playbook is only built if a playbook agent is requested.
+    config_id picks a registered config (core/configs.py) for every game this worker plays."""
+    global _worker_playbook, _worker_agent_types, _worker_config, _worker_config_id
     _worker_agent_types = agent_types
+    _worker_config_id = config_id
+    _worker_config = None if config_id == "standard" else get_config(config_id)
     if "playbook" in agent_types:
         from core.math_playbook import MathPlaybook
-        _worker_playbook = MathPlaybook(CONFIG, max_length=playbook_length)
+        _worker_playbook = MathPlaybook(_worker_config or CONFIG, max_length=playbook_length)
 
 
 # ---------------------------------------------------------------------------
@@ -118,14 +124,15 @@ def check_final_board(game) -> List[str]:
 def play_one_game(seed: int, playbook=None, agent_types=None) -> dict:
     agent_types = agent_types or _worker_agent_types
     playbook = playbook or _worker_playbook
+    config = _worker_config or CONFIG
     random.seed(seed)
     result = {"seed": seed, "crashed": False, "problems": []}
     start = time.time()
     try:
-        session = GameSession("agent_vs_agent", CONFIG, playbook=playbook, agent_types=agent_types)
+        session = GameSession("agent_vs_agent", config, playbook=playbook, agent_types=agent_types, config_id=_worker_config_id)
         game = session.game
-        expected = _expected_symbol_counts(CONFIG)
-        max_steps = CONFIG.get("max_turns", 75) * 2
+        expected = _expected_symbol_counts(config)
+        max_steps = config.get("max_turns", 75) * 2
         turn_times = []
         steps = 0
         last_mover: Optional[str] = None
@@ -210,6 +217,7 @@ def main(argv=None) -> int:
                     default=int(os.environ.get("EQUADIUM_PLAYBOOK_LENGTH", "4")))
     ap.add_argument("--agents", nargs=2, default=["search", "search"], metavar=("FIRST", "SECOND"),
                     help="algorithm for each seat: search | playbook (default: search search)")
+    ap.add_argument("--config", default="standard", help="registered config id (see core/configs.py)")
     ap.add_argument("--json", help="write full per-game results to this file")
     args = ap.parse_args(argv)
 
@@ -217,13 +225,13 @@ def main(argv=None) -> int:
     t0 = time.time()
     if args.workers > 1:
         with ProcessPoolExecutor(args.workers, initializer=_init_worker,
-                                 initargs=(args.playbook_length, args.agents)) as pool:
+                                 initargs=(args.playbook_length, args.agents, args.config)) as pool:
             results = []
             for r in pool.map(play_one_game, seeds):
                 results.append(r)
                 _progress(r, len(results), args.games)
     else:
-        _init_worker(args.playbook_length, args.agents)
+        _init_worker(args.playbook_length, args.agents, args.config)
         results = []
         for seed in seeds:
             r = play_one_game(seed)

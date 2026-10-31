@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from web.api.models import MoveModel, CreateGameModel, SwapModel
 from web.api.serialize import game_to_model, tile_to_model, _tiles_from_model
 from core.game_config import CONFIG
+from core.configs import list_configs
 from core.game_entities import Tile
 from core.session import GameSession, MODES, HUMAN
 from web.api import persistence
@@ -210,6 +211,12 @@ SOLO_MODES = ("human_vs_agent", "agent_vs_agent")
 def health():
     """Cheap liveness check for the keep-alive ping (.github/workflows/keepalive.yml)."""
     return {"status": "ok"}
+
+
+@app.get("/configs")
+def configs():
+    """The standard game plus every beta config. Pass an id as `config` to POST /rooms to play it online."""
+    return {"configs": list_configs()}
 
 
 @app.get("/modes")

@@ -44,6 +44,8 @@ export interface GameState {
     /** online games only */
     labels?: Record<string, string>;
     joined?: boolean;
+    /** online games: the rules in play (anything with beta: true is an experiment) */
+    config?: ConfigInfo;
     /** a locked-out player asking whoever holds a seat to let them back in */
     reclaim_requests?: { id: string; seat: string; label: string }[];
 }
@@ -90,3 +92,5 @@ export interface Stats {
     vs_humans: { games: number; wins: number };
     recent: { game_id: string; mode: string; opponent: 'agent' | 'human'; outcome: 'win' | 'loss' | 'tie'; score: number; opp_score: number; finished_at: string }[];
 }
+
+export interface ConfigInfo { id: string; name: string; beta: boolean; description: string }
